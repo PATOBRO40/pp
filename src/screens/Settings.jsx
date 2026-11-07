@@ -119,6 +119,7 @@ export function Settings() {
           <button class="btn ghost" onClick={() => fileRef.current.click()}><Icon name="down" size={18} /> Importar JSON</button>
         </div>
         <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={onFile} />
+        <button class="btn ghost wide" onClick={() => set({ sheet: { type: 'reset' } })}><Icon name="reset" size={18} /> Reiniciar tiempo</button>
         <button class="btn danger-outline wide" onClick={() => set({ sheet: { type: 'wipe' } })}><Icon name="trash" size={18} /> Borrar todo</button>
         <p class="fine">Los datos viven solo en este iPhone. Si borras la app o su almacenamiento, se pierden: exporta un respaldo con regularidad y guárdalo en Archivos o iCloud.</p>
       </section>

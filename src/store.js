@@ -193,6 +193,25 @@ export function deleteSession(id) {
   toast('Sesión eliminada', { action: { label: 'Deshacer', fn: () => set({ sessions: prev }) } });
 }
 
+/**
+ * Pone a cero el tiempo desde `from` hasta ahora (-Infinity = todo), de una categoría o de 'all'.
+ * Lo anterior a `from` se conserva: una sesión que cruza ese límite se recorta.
+ * Si la sesión activa entra en el reinicio, su cronómetro vuelve a 0 y sigue corriendo.
+ */
+export function resetTime(catId, from) {
+  const t = now();
+  const prev = state.sessions;
+  const next = [];
+  for (const s of prev) {
+    const hit = (catId === 'all' || s.cat === catId) && (s.end ?? t) > from;
+    if (!hit) { next.push(s); continue; }
+    if (s.start < from) next.push({ ...s, end: from });
+    if (s.end == null) next.push(s.start < from ? { ...s, id: newId(), start: t } : { ...s, start: t });
+  }
+  set({ sessions: next.sort((a, b) => a.start - b.start), dismissedForgot: null });
+  toast('Tiempo reiniciado', { kind: 'ok', action: { label: 'Deshacer', fn: () => set({ sessions: prev }) } });
+}
+
 export function resetSettings() {
   set(pick(defaults));
 }

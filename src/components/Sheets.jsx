@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import { Icon } from './Icon.jsx';
-import { HOUR, fmtDM, fromLocalInput, toLocalInput } from '../time.js';
-import { deleteSession, newId, now, saveSession, set, useStore } from '../store.js';
+import { HOUR, fmtDM, fmtDur, fromLocalInput, rangeTotals, startOfDay, startOfWeek, toLocalInput } from '../time.js';
+import { activeSession, deleteSession, newId, now, resetTime, saveSession, set, useNow, useStore } from '../store.js';
 import { applyImport } from '../backup.js';
 
 /** Hoja inferior para crear/editar una sesión. */
@@ -87,6 +87,54 @@ export function WipeDialog() {
           <button class="btn ghost" onClick={close}>Cancelar</button>
           <button class="btn danger-solid" disabled={txt.trim().toUpperCase() !== 'BORRAR'}
             onClick={() => { set({ sessions: [], sheet: null }); }}>Borrar todo</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const PERIODS = [['day', 'Hoy'], ['week', 'Esta semana'], ['all', 'Todo']];
+
+/** Reinicia el tiempo de una categoría o de todas, en el periodo elegido. */
+export function ResetSheet() {
+  const st = useStore();
+  const t = useNow();
+  const act = activeSession(st);
+  const [cat, setCat] = useState(act?.cat || 'all');
+  const [period, setPeriod] = useState('day');
+  const from = period === 'day' ? startOfDay(t) : period === 'week' ? startOfWeek(t) : -Infinity;
+  const totals = rangeTotals(st.sessions, from, Infinity, t);
+  const amount = cat === 'all' ? Object.values(totals).reduce((a, b) => a + b, 0) : totals[cat] || 0;
+  const running = act && (cat === 'all' || act.cat === cat);
+  const close = () => set({ sheet: null });
+
+  return (
+    <div class="sheet-wrap" onClick={close}>
+      <div class="sheet" onClick={(ev) => ev.stopPropagation()}>
+        <div class="grab" />
+        <h2>Reiniciar tiempo</h2>
+
+        <div class="seg seg-cats">
+          <button class={cat === 'all' ? 'on' : ''} style={{ '--c': 'var(--text)' }} onClick={() => setCat('all')}>Todas</button>
+          {st.cats.map((c) => (
+            <button key={c.id} class={cat === c.id ? 'on' : ''} style={{ '--c': `var(--p${c.color})` }} onClick={() => setCat(c.id)}>
+              <i class="dot" />{c.short}
+            </button>
+          ))}
+        </div>
+
+        <div class="seg">
+          {PERIODS.map(([k, l]) => <button key={k} class={period === k ? 'on' : ''} onClick={() => setPeriod(k)}>{l}</button>)}
+        </div>
+
+        <p class="msg warn">
+          {amount > 0 ? `Se quitarán ${fmtDur(amount)} de los totales, topes y estadísticas.` : 'No hay tiempo que reiniciar aquí.'}
+          {running && ' La sesión en curso volverá a 0 y seguirá corriendo.'}
+        </p>
+
+        <div class="sheet-actions">
+          <button class="btn ghost" onClick={close}>Cancelar</button>
+          <button class="btn danger-solid" disabled={amount <= 0} onClick={() => { resetTime(cat, from); close(); }}>Reiniciar</button>
         </div>
       </div>
     </div>

@@ -282,6 +282,7 @@ h1 { font-size: 30px; line-height: 1.1; margin-top: 4px; }
 [data-v='neon'] .tabbar button.on { background: var(--accent); color: var(--on-c); } [data-v='neon'] .tabbar button.on svg { color: var(--on-c); }
 
 /* ===== Versión final ===== */
+.seg-cats { flex-wrap: wrap; }
 .splash { min-height: 100dvh; display: grid; place-items: center; }
 .banner.bad { background: color-mix(in srgb, var(--over) 14%, var(--surface)); border-color: color-mix(in srgb, var(--over) 55%, transparent); color: var(--over); }
 .banner.bad .banner-actions button:not(.quiet) { background: var(--over); color: #fff; }

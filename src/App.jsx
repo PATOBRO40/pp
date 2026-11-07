@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'preact/hooks';
 import { Icon } from './components/Icon.jsx';
-import { EditSheet, ImportDialog, WipeDialog } from './components/Sheets.jsx';
+import { EditSheet, ImportDialog, ResetSheet, WipeDialog } from './components/Sheets.jsx';
 import { applyUpdate } from './pwa.js';
 import { Home } from './screens/Home.jsx';
 import { Log } from './screens/Log.jsx';
@@ -108,6 +108,7 @@ export function App() {
       </nav>
       <Toast t={st.toast} />
       {st.sheet?.type === 'edit' && <EditSheet id={st.sheet.id} />}
+      {st.sheet?.type === 'reset' && <ResetSheet />}
       {st.sheet?.type === 'wipe' && <WipeDialog />}
       {st.sheet?.type === 'import' && <ImportDialog parsed={st.sheet.parsed} />}
     </>

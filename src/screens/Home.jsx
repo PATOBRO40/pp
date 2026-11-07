@@ -101,6 +101,8 @@ export function Home() {
         })}
       </section>
 
+      <button class="btn ghost" onClick={() => set({ sheet: { type: 'reset' } })}><Icon name="reset" size={18} /> Reiniciar tiempo</button>
+
       <h3 class="sec">Topes de la semana</h3>
       <section class="panel stack">
         {st.groups.map((g) => {
