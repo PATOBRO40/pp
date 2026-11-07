@@ -1,34 +1,12 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Icon } from '../components/Icon.jsx';
+import { Row, Stepper, Toggle } from '../components/Controls.jsx';
+import { catById } from '../model.js';
 import { fmtDM, fmtDur } from '../time.js';
-import { resetSettings, set, toast, useStore } from '../store.js';
+import { addCategory, addGroup, resetSettings, set, setArchived, toast, updateCategory, updateGroup, useStore } from '../store.js';
 import { exportBackup, parseBackup } from '../backup.js';
 import { checkUpdate, isStandalone } from '../pwa.js';
 import { biometricAvailable, enrollBiometric, removeBiometric, setGrace } from '../lock.js';
-
-function Stepper({ value, onChange, step = 1, min = 0, max = 168, unit = '' }) {
-  const clamp = (v) => Math.min(max, Math.max(min, Math.round(v * 100) / 100));
-  return (
-    <div class="stepper">
-      <button onClick={() => onChange(clamp(value - step))} aria-label="Menos">−</button>
-      <input type="number" inputmode="decimal" value={value} step={step}
-        onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v)) onChange(clamp(v)); }} />
-      <span class="unit">{unit}</span>
-      <button onClick={() => onChange(clamp(value + step))} aria-label="Más">+</button>
-    </div>
-  );
-}
-
-function Toggle({ on, onChange }) {
-  return <button class={`switch ${on ? 'on' : ''}`} role="switch" aria-checked={on} onClick={() => onChange(!on)}><i /></button>;
-}
-
-const Row = ({ label, hint, children }) => (
-  <div class="set-row">
-    <div class="set-label"><span>{label}</span>{hint && <small>{hint}</small>}</div>
-    {children}
-  </div>
-);
 
 const VARIANTS = [['aurora', 'Aurora'], ['neon', 'Neón'], ['editorial', 'Editorial']];
 const GRACES = [[0, 'Al salir'], [60000, '1 min'], [300000, '5 min']];
@@ -38,8 +16,11 @@ export function Settings() {
   const fileRef = useRef(null);
   const [bio, setBio] = useState(false);
   useEffect(() => { biometricAvailable().then(setBio); }, []);
-  const setGroup = (id, patch) => set({ groups: st.groups.map((g) => (g.id === id ? { ...g, ...patch } : g)) });
-  const setCat = (id, patch) => set({ cats: st.cats.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
+  const openCat = (id) => set({ sheet: { type: 'cat', id } });
+  const openGroup = (id) => set({ sheet: { type: 'group', id } });
+  const live = st.cats.filter((c) => !c.archived);
+  const archived = st.cats.filter((c) => c.archived);
+  const catSummary = (c) => [c.cap != null ? `Tope ${c.cap} h` : 'Sin tope propio', ...st.groups.filter((g) => g.cats.includes(c.id)).map((g) => g.name)].join(' · ');
 
   const onFile = async (e) => {
     const f = e.currentTarget.files?.[0];
@@ -64,35 +45,62 @@ export function Settings() {
     <div class="screen">
       <header class="top"><div><div class="eyebrow">Ajustes</div><h1>Configuración</h1></div></header>
 
-      <h3 class="sec">Topes semanales</h3>
+      <h3 class="sec">Topes compartidos</h3>
       <section class="panel">
         {st.groups.map((g) => (
-          <Row key={g.id} label={g.name} hint={st.cats.filter((c) => c.group === g.id).map((c) => c.short).join(' + ')}>
-            <Stepper value={g.hours} step={0.5} unit="h" onChange={(v) => setGroup(g.id, { hours: v })} />
-          </Row>
+          <div class="set-row" key={g.id}>
+            <button class="set-label tap" onClick={() => openGroup(g.id)}>
+              <span>{g.name} <Icon name="right" size={13} /></span>
+              <small>{g.cats.map((id) => catById(st, id).short).join(' + ') || 'Sin categorías'}</small>
+            </button>
+            <Stepper value={g.hours} step={0.5} unit="h" onChange={(v) => updateGroup(g.id, { hours: v })} />
+          </div>
         ))}
-        <Row label="Avisar desde" hint="La barra se pone ámbar a este porcentaje y roja al superar el tope">
+        <button class="btn ghost wide" onClick={() => openGroup(addGroup())}><Icon name="plus" size={18} /> Añadir tope compartido</button>
+      </section>
+
+      <h3 class="sec">Topes propios</h3>
+      <section class="panel">
+        {live.filter((c) => c.cap != null).map((c) => (
+          <div class="set-row" key={c.id}>
+            <button class="set-label tap" onClick={() => openCat(c.id)}>
+              <span><i class="dot" style={{ background: `var(--p${c.color})` }} /> {c.name}</span>
+            </button>
+            <Stepper value={c.cap} step={0.5} unit="h" onChange={(v) => updateCategory(c.id, { cap: v })} />
+          </div>
+        ))}
+        <Row label="Avisar desde" hint="Ámbar a este porcentaje y rojo al superar cualquier tope">
           <Stepper value={st.warnPct} step={5} min={10} max={100} unit="%" onChange={(v) => set({ warnPct: v })} />
         </Row>
+        <p class="fine">Para poner o quitar el tope propio de una categoría, ábrela en Categorías.</p>
       </section>
 
       <h3 class="sec">Categorías</h3>
-      <section class="panel">
-        {st.cats.map((c) => (
-          <div class="cat-set" key={c.id}>
-            <input class="name-input" type="text" value={c.name} maxLength={28}
-              onInput={(e) => setCat(c.id, { name: e.currentTarget.value, short: e.currentTarget.value.replace(/^Ensoñaciones /, '') || c.short })} />
-            <div class="swatches">
-              {[1, 2, 3, 4, 5, 6].map((n) => (
-                <button key={n} class={c.color === n ? 'on' : ''} style={{ background: `var(--p${n})` }} onClick={() => setCat(c.id, { color: n })} aria-label={`Color ${n}`} />
-              ))}
-            </div>
-            <div class="seg small">
-              {st.groups.map((g) => <button key={g.id} class={c.group === g.id ? 'on' : ''} onClick={() => setCat(c.id, { group: g.id })}>Tope: {g.name}</button>)}
-            </div>
-          </div>
+      <section class="panel list">
+        {live.map((c) => (
+          <button class="cat-row" key={c.id} style={{ '--c': `var(--p${c.color})` }} onClick={() => openCat(c.id)}>
+            <span class="ico"><Icon name={c.icon} size={18} /></span>
+            <span class="cat-row-main"><b>{c.name}</b><small>{catSummary(c)}</small></span>
+            <Icon name="right" size={16} />
+          </button>
         ))}
+        <button class="btn ghost wide add" onClick={() => openCat(addCategory())}><Icon name="plus" size={18} /> Añadir categoría</button>
       </section>
+
+      {archived.length > 0 && (
+        <>
+          <h3 class="sec">Archivadas</h3>
+          <section class="panel list">
+            {archived.map((c) => (
+              <div class="cat-row" key={c.id} style={{ '--c': `var(--p${c.color})` }}>
+                <span class="ico"><Icon name={c.icon} size={18} /></span>
+                <button class="cat-row-main" onClick={() => openCat(c.id)}><b>{c.name}</b><small>Oculta · conserva su historial</small></button>
+                <button class="btn ghost sm" onClick={() => setArchived(c.id, false)}>Restaurar</button>
+              </div>
+            ))}
+          </section>
+        </>
+      )}
 
       <h3 class="sec">Sesiones</h3>
       <section class="panel">

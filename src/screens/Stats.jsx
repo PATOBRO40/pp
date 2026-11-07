@@ -3,6 +3,8 @@ import { Icon } from '../components/Icon.jsx';
 import { DAY, HOUR, fmtDM, fmtDayLong, fmtDur, fmtTime, rangeTotals, startOfDay, startOfWeek } from '../time.js';
 import { useNow, useStore } from '../store.js';
 import { dayStats, sum, weekStats } from '../stats.js';
+import { CapBar } from '../components/CapBar.jsx';
+import { allCaps, catById, catsWithData, topLevelCaps } from '../model.js';
 
 const LETTERS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
@@ -63,7 +65,7 @@ function DayView({ off, setOff }) {
       </div>
 
       <h3 class="sec">Por categoría</h3>
-      <Breakdown cats={st.cats} totals={d.totals} />
+      <Breakdown cats={catsWithData(st, d.totals)} totals={d.totals} />
 
       <h3 class="sec">Distribución por hora</h3>
       <section class="panel">
@@ -145,15 +147,22 @@ function WeekView({ off, setOff }) {
       </div>
 
       <h3 class="sec">Por categoría</h3>
-      <Breakdown cats={st.cats} totals={w.totals} />
+      <Breakdown cats={catsWithData(st, w.totals)} totals={w.totals} />
+
+      <h3 class="sec">Por tope</h3>
+      <section class="panel stack">
+        {allCaps(st).map((cap) => (
+          <CapBar compact key={cap.key} group={cap} cats={cap.cats.map((id) => catById(st, id))} perCat={w.totals} used={sum(w.totals, cap.cats)} warnPct={st.warnPct} />
+        ))}
+      </section>
 
       <h3 class="sec">Tendencia · 8 semanas</h3>
-      {st.groups.map((g) => {
-        const gc = st.cats.filter((c) => c.group === g.id).map((c) => c.id);
+      {topLevelCaps(st).map((g) => {
+        const gc = g.cats;
         const cap = g.hours * HOUR;
         const max = Math.max(cap * 1.15, ...trend.map((x) => sum(x.totals, gc)));
         return (
-          <section class="panel trend" key={g.id}>
+          <section class="panel trend" key={g.key}>
             <div class="panel-title">{g.name} <span>tope {g.hours} h</span></div>
             <div class="tbars">
               <i class="tcap" style={{ bottom: `${(cap / max) * 100}%` }} />

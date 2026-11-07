@@ -3,13 +3,14 @@ import { Icon } from './Icon.jsx';
 import { HOUR, fmtDM, fmtDur, fromLocalInput, rangeTotals, startOfDay, startOfWeek, toLocalInput } from '../time.js';
 import { activeSession, deleteSession, newId, now, resetTime, saveSession, set, useNow, useStore } from '../store.js';
 import { applyImport } from '../backup.js';
+import { liveCats } from '../model.js';
 
 /** Hoja inferior para crear/editar una sesión. */
 export function EditSheet({ id, defaults }) {
   const st = useStore();
   const existing = id ? st.sessions.find((s) => s.id === id) : null;
   const t = now();
-  const base = existing || defaults || { cat: st.cats[0].id, start: t - HOUR, end: t, note: '' };
+  const base = existing || defaults || { cat: liveCats(st)[0].id, start: t - HOUR, end: t, note: '' };
   const [cat, setCat] = useState(base.cat);
   const [start, setStart] = useState(toLocalInput(base.start));
   const [end, setEnd] = useState(base.end == null ? toLocalInput(t) : toLocalInput(base.end));
@@ -39,7 +40,7 @@ export function EditSheet({ id, defaults }) {
         <h2>{existing ? 'Editar sesión' : 'Añadir sesión olvidada'}</h2>
 
         <div class="seg seg-cats">
-          {st.cats.map((c) => (
+          {st.cats.filter((c) => !c.archived || c.id === cat).map((c) => (
             <button key={c.id} class={cat === c.id ? 'on' : ''} style={{ '--c': `var(--p${c.color})` }} onClick={() => setCat(c.id)}>
               <i class="dot" />{c.short}
             </button>
@@ -116,7 +117,7 @@ export function ResetSheet() {
 
         <div class="seg seg-cats">
           <button class={cat === 'all' ? 'on' : ''} style={{ '--c': 'var(--text)' }} onClick={() => setCat('all')}>Todas</button>
-          {st.cats.map((c) => (
+          {st.cats.filter((c) => !c.archived || st.sessions.some((s) => s.cat === c.id)).map((c) => (
             <button key={c.id} class={cat === c.id ? 'on' : ''} style={{ '--c': `var(--p${c.color})` }} onClick={() => setCat(c.id)}>
               <i class="dot" />{c.short}
             </button>

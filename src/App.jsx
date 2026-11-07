@@ -11,6 +11,8 @@ import { DAY, HOUR, fmtDur, rangeTotals, startOfWeek } from './time.js';
 import { activeSession, getState, now, set, toast, useStore } from './store.js';
 import { beep } from './audio.js';
 import { sum } from './stats.js';
+import { allCaps } from './model.js';
+import { CategorySheet, GroupSheet } from './components/Config.jsx';
 
 const TABS = [
   ['home', 'Inicio', 'home'],
@@ -36,18 +38,24 @@ function useCapAlerts() {
       const ws = startOfWeek(t);
       const week = rangeTotals(s.sessions, ws, ws + 7 * DAY, t);
       const act = activeSession(s);
-      for (const g of s.groups) {
-        const cats = s.cats.filter((c) => c.group === g.id);
-        const used = sum(week, cats.map((c) => c.id));
-        const pct = used / (g.hours * HOUR);
+      // Una sesión puede llenar varios topes a la vez: se avisa de todos en un solo mensaje.
+      const msgs = [];
+      let worst = 0;
+      for (const cap of allCaps(s)) {
+        if (!(cap.hours > 0)) continue;
+        const used = sum(week, cap.cats);
+        const pct = used / (cap.hours * HOUR);
         const lvl = pct > 1 ? 2 : pct >= s.warnPct / 100 ? 1 : 0;
-        const prev = levels.current[g.id];
-        if (prev !== undefined && lvl > prev && act && cats.some((c) => c.id === act.cat)) {
-          if (lvl === 1) toast(`${g.name}: llegaste al ${s.warnPct}% del tope. Quedan ${fmtDur(g.hours * HOUR - used)}.`, { kind: 'warn', long: true });
-          else toast(`${g.name}: superaste el tope de ${g.hours} h. Puedes seguir, es solo un aviso.`, { kind: 'over', long: true });
-          if (s.sound) beep(lvl === 1 ? 'warn' : 'over');
+        const prev = levels.current[cap.key];
+        if (prev !== undefined && lvl > prev && act && cap.cats.includes(act.cat)) {
+          msgs.push(lvl === 1 ? `${cap.name}: ${s.warnPct}% del tope, quedan ${fmtDur(cap.hours * HOUR - used)}` : `${cap.name}: superaste las ${cap.hours} h`);
+          worst = Math.max(worst, lvl);
         }
-        levels.current[g.id] = lvl;
+        levels.current[cap.key] = lvl;
+      }
+      if (msgs.length) {
+        toast(msgs.join(' · ') + (worst === 2 ? '. Es solo un aviso.' : '.'), { kind: worst === 2 ? 'over' : 'warn', long: true });
+        if (s.sound) beep(worst === 2 ? 'over' : 'warn');
       }
     }, 1000);
     return () => clearInterval(id);
@@ -112,6 +120,8 @@ export function App() {
       <Toast t={st.toast} />
       {st.sheet?.type === 'edit' && <EditSheet id={st.sheet.id} />}
       {st.sheet?.type === 'reset' && <ResetSheet />}
+      {st.sheet?.type === 'cat' && <CategorySheet id={st.sheet.id} />}
+      {st.sheet?.type === 'group' && <GroupSheet id={st.sheet.id} />}
       {st.sheet?.type === 'lock' && <LockSheet key={st.sheet.mode} mode={st.sheet.mode} />}
       {st.sheet?.type === 'wipe' && <WipeDialog />}
       {st.sheet?.type === 'import' && <ImportDialog parsed={st.sheet.parsed} />}

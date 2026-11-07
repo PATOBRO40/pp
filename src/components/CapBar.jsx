@@ -21,19 +21,19 @@ export function CapBar({ group, used, perCat, cats, warnPct, compact }) {
   return (
     <div class={`cap ${state} ${compact ? 'compact' : ''}`}>
       <div class="cap-head">
-        <span class="cap-name">{group.name}</span>
+        <span class="cap-name">{cats.length === 1 && <i class="dot" style={{ background: `var(--p${cats[0].color})` }} />}{group.name}</span>
         <span class="cap-nums"><b>{fmtDur(used)}</b> / {group.hours} h</span>
       </div>
       <div class="cap-track" role="progressbar" aria-valuenow={Math.round(pct)}>
         <div class="cap-fill" style={{ width: `${Math.min(pct, 100)}%` }} />
         <i class="cap-tick" style={{ left: `${warnPct}%` }} />
       </div>
-      <div class="cap-split">
+      {cats.length > 1 && <div class="cap-split">
         {cats.map((c) => {
           const v = perCat[c.id] || 0;
           return v > 0 ? <span key={c.id} style={{ flex: v, background: `var(--p${c.color})` }} /> : null;
         })}
-      </div>
+      </div>}
       <div class="cap-foot">
         <span class="cap-msg">{state === 'over' ? '⚠ ' : ''}{msg}</span>
         <span class="cap-pct">{Math.round(pct)}%</span>

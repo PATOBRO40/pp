@@ -20,6 +20,7 @@ El service worker solo se registra en la versión compilada. Por `http://IP-loca
 | Archivo | Función |
 | --- | --- |
 | `src/time.js` | Límites de día y semana en Bogotá, división por medianoche, formatos |
+| `src/model.js` | Categorías, topes compartidos y migración de ajustes |
 | `src/stats.js` | Estadísticas diarias y semanales |
 | `src/db.js` | IndexedDB (sesiones, ajustes, metadatos) |
 | `src/store.js` | Estado global; guarda solo los cambios en IndexedDB |
@@ -36,11 +37,25 @@ Cada sesión guarda `start` y `end` en milisegundos (`end: null` si está activa
 
 Una sesión que cruza la medianoche es un solo registro. Se reparte entre días y semanas al calcular, nunca al guardar.
 
+## Categorías y topes
+
+Cada categoría puede tener un **tope propio** (horas por semana) y estar en varios **topes compartidos**, que suman el tiempo de sus categorías. Por defecto:
+
+| Tope compartido | Horas | Categorías |
+| --- | --- | --- |
+| Ensoñaciones | 20 | Ensoñaciones con IA, Ensoñaciones sin IA |
+| Entretenimiento | 30 | Videojuegos (21), Series (21) |
+| Uso de IA | 25 | Ensoñaciones con IA, Uso recreativo de IA (15) |
+
+Proyectos tiene un tope propio de 10 h. Todo se edita en Ajustes; archivar oculta una categoría y conserva su historial, y eliminarla borra también sus sesiones.
+
+Los ajustes de la versión anterior se migran solos (`migrateSettings`): un grupo con una sola categoría pasa a ser su tope propio.
+
 ## Respaldo
 
 Los datos viven solo en el almacenamiento de la app instalada, que es independiente del de Safari. Si se borra la app, se borran los datos. Exporta desde **Ajustes → Datos y respaldo**; la app lo recuerda cada 7 días.
 
-Formato: `{ app: "PP", schema: 1, exportedAt, settings, sessions }`. Si cambia la estructura, sube `schema` y añade la migración en `parseBackup`.
+Formato: `{ app: "PP", schema: 2, exportedAt, settings, sessions }`. Si cambia la estructura, sube `schema` y añade la migración en `parseBackup`.
 
 ## Bloqueo
 

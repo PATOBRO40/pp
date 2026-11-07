@@ -4,28 +4,12 @@ import { useEffect, useState } from 'preact/hooks';
 import * as db from './db.js';
 import { beep } from './audio.js';
 import { fmtDur } from './time.js';
+import { catById, defaults, liveCats, migrateSettings } from './model.js';
 
 export const now = () => Date.now();
 
-export const SETTING_KEYS = ['cats', 'groups', 'warnPct', 'sound', 'forgetHours', 'minSeconds', 'theme', 'variant'];
-
-export const defaults = {
-  cats: [
-    { id: 'ia', name: 'Ensoñaciones con IA', short: 'Con IA', group: 'sonar', color: 1 },
-    { id: 'sin', name: 'Ensoñaciones sin IA', short: 'Sin IA', group: 'sonar', color: 2 },
-    { id: 'proy', name: 'Proyectos', short: 'Proyectos', group: 'proy', color: 3 },
-  ],
-  groups: [
-    { id: 'sonar', name: 'Ensoñaciones', hours: 20 },
-    { id: 'proy', name: 'Proyectos', hours: 10 },
-  ],
-  warnPct: 80,
-  sound: true,
-  forgetHours: 8,
-  minSeconds: 5,
-  theme: 'dark',
-  variant: 'aurora',
-};
+export const SETTING_KEYS = ['settingsVersion', 'cats', 'groups', 'warnPct', 'sound', 'forgetHours', 'minSeconds', 'theme', 'variant'];
+export { defaults };
 
 let state = {
   ...defaults,
@@ -105,8 +89,10 @@ export async function init() {
   try {
     const { sessions, settings, meta, lock } = await db.loadAll();
     const m = { ...state.meta, ...(meta || {}) };
-    apply({ ...defaults, ...(settings || {}), sessions, meta: m, lock, locked: !!lock, ready: true });
+    const loaded = migrateSettings(settings); // ajustes de versiones anteriores
+    apply({ ...defaults, ...(loaded || {}), sessions, meta: m, lock, locked: !!lock, ready: true });
     lastSettings = JSON.stringify(pick(state));
+    if (loaded !== settings) queue = queue.then(() => db.setKV('settings', pick(state))).catch(() => apply({ dbError: true }));
     if (!meta) setMeta({});
   } catch {
     apply({ ready: true, dbError: true });
@@ -166,7 +152,7 @@ function closeActive(list, t) {
   return { list: list.map((x) => (x === a ? closed : x)), closed, dropped: false };
 }
 
-const catOf = (id) => state.cats.find((c) => c.id === id);
+const catOf = (id) => catById(state, id);
 
 /** Tocar una categoría: inicia, o finaliza si ya estaba activa. Solo una activa a la vez. */
 export function toggleCat(catId) {
@@ -220,6 +206,74 @@ export function resetTime(catId, from) {
   toast('Tiempo reiniciado', { kind: 'ok', action: { label: 'Deshacer', fn: () => set({ sessions: prev }) } });
 }
 
+/** Restablece ajustes y categorías por defecto, conservando las categorías propias (tienen historial). */
 export function resetSettings() {
-  set(pick(defaults));
+  const extra = state.cats.filter((c) => !defaults.cats.some((d) => d.id === c.id));
+  set({ ...pick(defaults), cats: [...defaults.cats.map((c) => ({ ...c })), ...extra], groups: defaults.groups.map((g) => ({ ...g })) });
+}
+
+// ---------- Categorías y topes ----------
+
+export function updateCategory(id, patch) {
+  set({ cats: state.cats.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
+}
+
+export function addCategory() {
+  const used = new Set(liveCats(state).map((c) => c.color));
+  const color = [1, 2, 3, 4, 5, 6].find((n) => !used.has(n)) || 1;
+  const c = { id: 'c' + newId(), name: 'Nueva categoría', short: 'Nueva', color, icon: 'star', cap: null, archived: false };
+  set({ cats: [...state.cats, c] });
+  return c.id;
+}
+
+export function moveCategory(id, dir) {
+  const cats = [...state.cats];
+  const i = cats.findIndex((c) => c.id === id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= cats.length) return;
+  [cats[i], cats[j]] = [cats[j], cats[i]];
+  set({ cats });
+}
+
+const lastLive = (id) => liveCats(state).filter((c) => c.id !== id).length === 0;
+
+/** Archivar oculta la tarjeta pero conserva el historial. Finaliza su sesión si estaba en curso. */
+export function setArchived(id, archived) {
+  if (archived && lastLive(id)) return toast('Debe quedar al menos una categoría activa', { kind: 'warn' });
+  let sessions = state.sessions;
+  if (archived && activeSession()?.cat === id) sessions = closeActive(sessions, now()).list;
+  set({ sessions, cats: state.cats.map((c) => (c.id === id ? { ...c, archived } : c)) });
+  toast(archived ? 'Categoría archivada' : 'Categoría restaurada', { kind: 'ok' });
+}
+
+/** Elimina la categoría con todas sus sesiones (se puede deshacer unos segundos). */
+export function deleteCategory(id) {
+  if (lastLive(id) && !catOf(id).archived) {
+    toast('Debe quedar al menos una categoría activa', { kind: 'warn' });
+    return false;
+  }
+  const prev = { cats: state.cats, groups: state.groups, sessions: state.sessions };
+  set({
+    cats: state.cats.filter((c) => c.id !== id),
+    groups: state.groups.map((g) => ({ ...g, cats: g.cats.filter((x) => x !== id) })),
+    sessions: state.sessions.filter((s) => s.cat !== id),
+  });
+  toast('Categoría eliminada', { action: { label: 'Deshacer', fn: () => set(prev) } });
+  return true;
+}
+
+export function updateGroup(id, patch) {
+  set({ groups: state.groups.map((g) => (g.id === id ? { ...g, ...patch } : g)) });
+}
+
+export function addGroup() {
+  const g = { id: 'g' + newId(), name: 'Nuevo tope', hours: 10, cats: [] };
+  set({ groups: [...state.groups, g] });
+  return g.id;
+}
+
+export function deleteGroup(id) {
+  const prev = state.groups;
+  set({ groups: prev.filter((g) => g.id !== id) });
+  toast('Tope eliminado', { action: { label: 'Deshacer', fn: () => set({ groups: prev }) } });
 }

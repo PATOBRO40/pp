@@ -4,6 +4,7 @@ import { CapBar } from '../components/CapBar.jsx';
 import { DAY, fmtDM, fmtDayShort, fmtDur, fmtTime, rangeTotals, splitByDay, startOfWeek } from '../time.js';
 import { set, useNow, useStore } from '../store.js';
 import { sum } from '../stats.js';
+import { catById, topLevelCaps } from '../model.js';
 
 export function Log() {
   const st = useStore();
@@ -46,10 +47,9 @@ export function Log() {
       </div>
 
       <section class="panel stack">
-        {st.groups.map((g) => {
-          const cats = st.cats.filter((c) => c.group === g.id);
-          return <CapBar compact key={g.id} group={g} cats={cats} perCat={week} used={sum(week, cats.map((c) => c.id))} warnPct={st.warnPct} />;
-        })}
+        {topLevelCaps(st).map((cap) => (
+          <CapBar compact key={cap.key} group={cap} cats={cap.cats.map((id) => catById(st, id))} perCat={week} used={sum(week, cap.cats)} warnPct={st.warnPct} />
+        ))}
       </section>
 
       {days.length === 0 && <div class="empty"><Icon name="list" size={30} /><p>Sin sesiones esta semana.</p></div>}
@@ -71,7 +71,7 @@ export function Log() {
             </div>
             <div class="panel list">
               {sorted.map((g) => {
-                const c = st.cats.find((x) => x.id === g.cat);
+                const c = catById(st, g.cat);
                 const running = g.s.end == null;
                 const contFrom = g.s.start < g.dayStart;
                 const contTo = (g.s.end ?? t) > g.dayStart + DAY;

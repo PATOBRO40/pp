@@ -1,8 +1,9 @@
 // Respaldo en JSON: exportar (hoja de compartir de iOS / descarga) e importar con validación.
 import { SETTING_KEYS, getState, newId, set, setMeta, toast } from './store.js';
 import { dayKey } from './time.js';
+import { migrateSettings } from './model.js';
 
-const SCHEMA = 1;
+const SCHEMA = 2; // 2: categorías con tope propio y topes compartidos
 
 export function buildBackup() {
   const s = getState();
@@ -44,14 +45,17 @@ export async function exportBackup() {
 
 const isNum = (n) => typeof n === 'number' && Number.isFinite(n);
 
-function validSettings(s) {
-  if (!s || typeof s !== 'object') return null;
+function validSettings(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const s = migrateSettings(raw); // acepta respaldos de versiones anteriores
   const okCats = Array.isArray(s.cats) && s.cats.length > 0 &&
-    s.cats.every((c) => c && typeof c.id === 'string' && typeof c.name === 'string' && typeof c.group === 'string' && isNum(c.color));
-  const okGroups = Array.isArray(s.groups) && s.groups.every((g) => g && typeof g.id === 'string' && typeof g.name === 'string' && isNum(g.hours));
+    s.cats.every((c) => c && typeof c.id === 'string' && typeof c.name === 'string' && isNum(c.color) && (c.cap == null || isNum(c.cap)));
+  const okGroups = Array.isArray(s.groups) &&
+    s.groups.every((g) => g && typeof g.id === 'string' && typeof g.name === 'string' && isNum(g.hours) && Array.isArray(g.cats));
   if (!okCats || !okGroups) return null;
   const out = {};
   for (const k of SETTING_KEYS) if (k in s) out[k] = s[k];
+  out.cats = s.cats.map((c) => ({ ...c, short: c.short || c.name, icon: c.icon || 'star', cap: c.cap ?? null, archived: !!c.archived }));
   return out;
 }
 
