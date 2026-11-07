@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'preact/hooks';
 import { Icon } from './components/Icon.jsx';
 import { EditSheet, ImportDialog, ResetSheet, WipeDialog } from './components/Sheets.jsx';
+import { LockScreen, LockSheet } from './components/Lock.jsx';
 import { applyUpdate } from './pwa.js';
 import { Home } from './screens/Home.jsx';
 import { Log } from './screens/Log.jsx';
@@ -30,7 +31,7 @@ function useCapAlerts() {
   useEffect(() => {
     const id = setInterval(() => {
       const s = getState();
-      if (!s.ready) return;
+      if (!s.ready || s.locked) return;
       const t = now();
       const ws = startOfWeek(t);
       const week = rangeTotals(s.sessions, ws, ws + 7 * DAY, t);
@@ -93,22 +94,25 @@ export function App() {
     if (st.updateReady) toast('Hay una versión nueva de PP', { kind: 'info', long: true, action: { label: 'Actualizar', fn: applyUpdate } });
   }, [st.updateReady]);
 
+  if (st.ready && st.locked) return <><div class="ambient" aria-hidden="true" /><LockScreen /></>;
+
   const Screen = { home: Home, log: Log, stats: Stats, settings: Settings }[st.tab];
 
   return (
     <>
       <div class="ambient" aria-hidden="true" />
       {!st.ready ? <div class="splash"><div class="brand">PP</div></div> : <main key={st.tab}><Screen /></main>}
-      <nav class="tabbar">
+      {st.ready && <nav class="tabbar">
         {TABS.map(([id, label, icon]) => (
           <button key={id} class={st.tab === id ? 'on' : ''} onClick={() => { set({ tab: id }); window.scrollTo(0, 0); }}>
             <Icon name={icon} size={23} /><span>{label}</span>
           </button>
         ))}
-      </nav>
+      </nav>}
       <Toast t={st.toast} />
       {st.sheet?.type === 'edit' && <EditSheet id={st.sheet.id} />}
       {st.sheet?.type === 'reset' && <ResetSheet />}
+      {st.sheet?.type === 'lock' && <LockSheet key={st.sheet.mode} mode={st.sheet.mode} />}
       {st.sheet?.type === 'wipe' && <WipeDialog />}
       {st.sheet?.type === 'import' && <ImportDialog parsed={st.sheet.parsed} />}
     </>

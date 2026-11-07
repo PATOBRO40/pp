@@ -293,3 +293,15 @@ h1 { font-size: 30px; line-height: 1.1; margin-top: 4px; }
 
 /* Con barra de estado translúcida (iOS) el texto es blanco: en tema claro, franja oscura detrás de la hora */
 :root[data-theme='light']::before { content: ''; position: fixed; z-index: 100; top: 0; left: 0; right: 0; height: env(safe-area-inset-top); background: #14151F; }
+
+/* ===== Pantalla de bloqueo ===== */
+.lock { min-height: 100dvh; display: grid; place-items: center; padding: calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 20px); }
+.lock-box { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 14px; animation: fade .35s var(--ease); }
+.lock-box .brand { width: 64px; height: 64px; border-radius: 20px; font-size: 23px; margin: 0 auto; }
+.lock-box h1 { text-align: center; font-size: 26px; margin: 0 0 6px; }
+.lock-box p { margin: 0; color: var(--text2); }
+.lock-box form { display: flex; flex-direction: column; gap: 10px; }
+.lock-box input { width: 100%; min-height: 50px; padding: 12px 14px; background: var(--surface2); border: 0; border-radius: 14px; outline: 0; }
+.lock-box .btn { width: 100%; }
+.link { align-self: center; padding: 10px; color: var(--text2); font-size: 14px; text-decoration: underline; }
+.msg.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }

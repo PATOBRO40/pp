@@ -16,6 +16,7 @@ const P = {
   down: <><path d="M12 4v11M7 11l5 5 5-5" /><path d="M5 20h14" /></>,
   up: <><path d="M12 16V5M7 9l5-5 5 5" /><path d="M5 20h14" /></>,
   clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3 2" /></>,
+  face: <><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" /><path d="M9 9.5v1M15 9.5v1M12 9.5v3.5h-1M9 15.5c1.8 1.4 4.2 1.4 6 0" /></>,
   reset: <><path d="M4 12a8 8 0 1 0 2.6-5.9" /><path d="M4 4.5V9h4.5" /></>,
   warn: <><path d="M12 4l9 16H3z" /><path d="M12 10v4M12 17v.5" /></>,
 };

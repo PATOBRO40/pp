@@ -1,9 +1,10 @@
-import { useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { Icon } from '../components/Icon.jsx';
 import { fmtDM, fmtDur } from '../time.js';
 import { resetSettings, set, toast, useStore } from '../store.js';
 import { exportBackup, parseBackup } from '../backup.js';
 import { checkUpdate, isStandalone } from '../pwa.js';
+import { biometricAvailable, enrollBiometric, removeBiometric, setGrace } from '../lock.js';
 
 function Stepper({ value, onChange, step = 1, min = 0, max = 168, unit = '' }) {
   const clamp = (v) => Math.min(max, Math.max(min, Math.round(v * 100) / 100));
@@ -30,10 +31,13 @@ const Row = ({ label, hint, children }) => (
 );
 
 const VARIANTS = [['aurora', 'Aurora'], ['neon', 'Neón'], ['editorial', 'Editorial']];
+const GRACES = [[0, 'Al salir'], [60000, '1 min'], [300000, '5 min']];
 
 export function Settings() {
   const st = useStore();
   const fileRef = useRef(null);
+  const [bio, setBio] = useState(false);
+  useEffect(() => { biometricAvailable().then(setBio); }, []);
   const setGroup = (id, patch) => set({ groups: st.groups.map((g) => (g.id === id ? { ...g, ...patch } : g)) });
   const setCat = (id, patch) => set({ cats: st.cats.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
 
@@ -44,6 +48,15 @@ export function Settings() {
     const parsed = parseBackup(await f.text());
     if (parsed.error) toast(parsed.error, { kind: 'warn', long: true });
     else set({ sheet: { type: 'import', parsed } });
+  };
+
+  const toggleBio = async (on) => {
+    try {
+      if (on) { await enrollBiometric(); toast('Face ID activado', { kind: 'ok' }); }
+      else { await removeBiometric(); toast('Face ID desactivado'); }
+    } catch {
+      toast('No se pudo activar Face ID. Revisa que el Llavero de iCloud esté activo.', { kind: 'warn', long: true });
+    }
   };
 
   const last = st.meta.lastBackupAt;
@@ -92,6 +105,27 @@ export function Settings() {
         <Row label="Sonido sutil" hint="Al iniciar, finalizar y avisos de tope">
           <Toggle on={st.sound} onChange={(v) => set({ sound: v })} />
         </Row>
+      </section>
+
+      <h3 class="sec">Seguridad</h3>
+      <section class="panel">
+        <Row label="Bloqueo con contraseña" hint={st.lock ? 'Activado' : 'Pide contraseña para entrar a la app'}>
+          <Toggle on={!!st.lock} onChange={() => set({ sheet: { type: 'lock', mode: st.lock ? 'off' : 'create' } })} />
+        </Row>
+        {st.lock && bio && (
+          <Row label="Face ID" hint="Entrar sin escribir la contraseña">
+            <Toggle on={!!st.lock.credId} onChange={toggleBio} />
+          </Row>
+        )}
+        {st.lock && (
+          <Row label="Bloquear" hint="Tras salir de la app">
+            <div class="seg small">
+              {GRACES.map(([ms, l]) => <button key={ms} class={st.lock.grace === ms ? 'on' : ''} onClick={() => setGrace(ms)}>{l}</button>)}
+            </div>
+          </Row>
+        )}
+        {st.lock && <button class="btn ghost wide" onClick={() => set({ sheet: { type: 'lock', mode: 'change' } })}>Cambiar contraseña</button>}
+        {st.lock && !bio && <p class="fine">Face ID no está disponible en este navegador.</p>}
       </section>
 
       <h3 class="sec">Apariencia</h3>

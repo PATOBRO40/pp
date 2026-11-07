@@ -24,6 +24,7 @@ El service worker solo se registra en la versión compilada. Por `http://IP-loca
 | `src/db.js` | IndexedDB (sesiones, ajustes, metadatos) |
 | `src/store.js` | Estado global; guarda solo los cambios en IndexedDB |
 | `src/backup.js` | Exportar e importar JSON |
+| `src/lock.js` | Bloqueo de entrada: contraseña y Face ID |
 | `src/pwa.js` | Registro del service worker y actualizaciones |
 | `src/sw-template.js` | Service worker; `vite.config.js` le añade versión y lista de archivos |
 | `src/screens/`, `src/components/` | Interfaz |
@@ -40,6 +41,14 @@ Una sesión que cruza la medianoche es un solo registro. Se reparte entre días 
 Los datos viven solo en el almacenamiento de la app instalada, que es independiente del de Safari. Si se borra la app, se borran los datos. Exporta desde **Ajustes → Datos y respaldo**; la app lo recuerda cada 7 días.
 
 Formato: `{ app: "PP", schema: 1, exportedAt, settings, sessions }`. Si cambia la estructura, sube `schema` y añade la migración en `parseBackup`.
+
+## Bloqueo
+
+Opcional, en **Ajustes → Seguridad**. La contraseña se guarda como hash PBKDF2 y Face ID usa WebAuthn; la configuración está en la clave `lock` de IndexedDB y no entra en los respaldos.
+
+Es un bloqueo de acceso, no cifrado: los datos en IndexedDB y los JSON exportados no van cifrados. Sin servidor no hay recuperación: si se olvida la contraseña y no hay Face ID, entrar exige borrar las sesiones.
+
+La credencial de Face ID depende del dominio. Si la app cambia de dirección, hay que volver a activarla.
 
 ## Publicar cambios
 

@@ -33,6 +33,8 @@ let state = {
   dbError: false,      // ¿falló un guardado?
   persisted: null,     // resultado de navigator.storage.persist()
   updateReady: false,  // hay una versión nueva del service worker esperando
+  lock: null,          // configuración del bloqueo (ver lock.js); nunca va en los respaldos
+  locked: false,       // ¿se está mostrando la pantalla de bloqueo?
   sessions: [],
   meta: { installedAt: Date.now(), lastBackupAt: null, backupSnoozedUntil: 0, installHintDismissed: false },
   tab: 'home',
@@ -92,12 +94,18 @@ export function setMeta(patch) {
   queue = queue.then(() => db.setKV('meta', meta)).catch(() => apply({ dbError: true }));
 }
 
+/** Guarda la configuración del bloqueo; solo cambia el estado si se escribió en disco. */
+export async function setLock(lock) {
+  await db.setKV('lock', lock);
+  apply({ lock });
+}
+
 /** Carga los datos guardados. Se llama una vez al arrancar. */
 export async function init() {
   try {
-    const { sessions, settings, meta } = await db.loadAll();
+    const { sessions, settings, meta, lock } = await db.loadAll();
     const m = { ...state.meta, ...(meta || {}) };
-    apply({ ...defaults, ...(settings || {}), sessions, meta: m, ready: true });
+    apply({ ...defaults, ...(settings || {}), sessions, meta: m, lock, locked: !!lock, ready: true });
     lastSettings = JSON.stringify(pick(state));
     if (!meta) setMeta({});
   } catch {

@@ -46,12 +46,13 @@ async function run(stores, mode, fn, retry = true) {
 
 /** Lee todo al arrancar. */
 export async function loadAll() {
-  const [sessions, settings, meta] = await Promise.all([
+  const [sessions, settings, meta, lock] = await Promise.all([
     run(['sessions'], 'readonly', (tx) => tx.objectStore('sessions').getAll()),
     run(['kv'], 'readonly', (tx) => tx.objectStore('kv').get('settings')),
     run(['kv'], 'readonly', (tx) => tx.objectStore('kv').get('meta')),
+    run(['kv'], 'readonly', (tx) => tx.objectStore('kv').get('lock')),
   ]);
-  return { sessions: sessions || [], settings: settings || null, meta: meta || null };
+  return { sessions: sessions || [], settings: settings || null, meta: meta || null, lock: lock || null };
 }
 
 /** Escribe y borra sesiones en una sola transacción. */

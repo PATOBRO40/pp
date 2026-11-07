@@ -7,7 +7,9 @@ import './styles.css';
 import { App } from './App.jsx';
 import { init } from './store.js';
 import { registerSW } from './pwa.js';
+import { initAutoLock } from './lock.js';
 
 render(<App />, document.getElementById('app'));
 init();
 registerSW();
+initAutoLock();
