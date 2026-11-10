@@ -10,7 +10,7 @@ import { defaultFin, migrateFin } from './fin/model.js';
 
 export const now = () => Date.now();
 
-export const SETTING_KEYS = ['settingsVersion', 'cats', 'groups', 'warnPct', 'sound', 'forgetHours', 'minSeconds', 'theme', 'variant'];
+export const SETTING_KEYS = ['settingsVersion', 'cats', 'groups', 'warnPct', 'sound', 'forgetHours', 'minSeconds', 'theme', 'variant', 'privacy'];
 export { defaults };
 
 let state = {
@@ -279,12 +279,12 @@ export function toggleCat(catId) {
   if (act && act.cat === catId) {
     set({ sessions: list });
     if (state.sound) beep('stop');
-    toast(dropped ? 'Sesión muy corta, descartada' : `Guardado · ${cat.short} · ${fmtDur(closed.end - closed.start)}`, { kind: dropped ? 'info' : 'ok' });
+    toast(dropped ? 'Sesión muy corta, descartada' : `Guardado · ${cat.short} · ${fmtDur(closed.end - closed.start)}`, { kind: dropped ? 'info' : 'ok', sensitive: !dropped });
     return;
   }
   set({ sessions: [...list, { id: newId(), cat: catId, start: t, end: null, note: '' }], dismissedForgot: null });
   if (state.sound) beep('start');
-  if (closed) toast(`Guardado · ${catOf(closed.cat).short} · ${fmtDur(closed.end - closed.start)}`, { kind: 'ok' });
+  if (closed) toast(`Guardado · ${catOf(closed.cat).short} · ${fmtDur(closed.end - closed.start)}`, { kind: 'ok', sensitive: true });
 }
 
 export function saveSession(s) {

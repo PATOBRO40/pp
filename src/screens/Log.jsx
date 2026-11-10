@@ -1,5 +1,6 @@
 import { useState } from 'preact/hooks';
 import { Icon } from '../components/Icon.jsx';
+import { PrivacyButton } from '../components/Privacy.jsx';
 import { CapBar } from '../components/CapBar.jsx';
 import { DAY, fmtDM, fmtDayShort, fmtDur, fmtTime, rangeTotals, splitByDay, startOfWeek } from '../time.js';
 import { set, useNow, useStore } from '../store.js';
@@ -34,7 +35,7 @@ export function Log() {
           <div class="eyebrow">Registro</div>
           <h1>{off === 0 ? 'Esta semana' : `${fmtDM(ws)} – ${fmtDM(we - DAY)}`}</h1>
         </div>
-        <button class="round" aria-label="Añadir sesión" onClick={() => set({ sheet: { type: 'edit', id: null } })}><Icon name="plus" /></button>
+        <div class="top-actions"><PrivacyButton /><button class="round" aria-label="Añadir sesión" onClick={() => set({ sheet: { type: 'edit', id: null } })}><Icon name="plus" /></button></div>
       </header>
 
       <div class="weeknav">

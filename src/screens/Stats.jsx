@@ -1,5 +1,6 @@
 import { useState } from 'preact/hooks';
 import { Icon } from '../components/Icon.jsx';
+import { PrivacyButton } from '../components/Privacy.jsx';
 import { DAY, HOUR, fmtDM, fmtDayLong, fmtDur, fmtTime, rangeTotals, startOfDay, startOfWeek } from '../time.js';
 import { useNow, useStore } from '../store.js';
 import { dayStats, sum, weekStats } from '../stats.js';
@@ -163,7 +164,7 @@ function WeekView({ off, setOff }) {
         const max = Math.max(cap * 1.15, ...trend.map((x) => sum(x.totals, gc)));
         return (
           <section class="panel trend" key={g.key}>
-            <div class="panel-title">{g.name} <span>tope {g.hours} h</span></div>
+            <div class="panel-title"><span class="pn">{g.name}</span> <span>tope {g.hours} h</span></div>
             <div class="tbars">
               <i class="tcap" style={{ bottom: `${(cap / max) * 100}%` }} />
               {trend.map((x, i) => {
@@ -186,7 +187,7 @@ export function Stats() {
   const [wOff, setWOff] = useState(0);
   return (
     <div class="screen">
-      <header class="top"><div><div class="eyebrow">Estadísticas</div><h1>{mode === 'day' ? 'Diarias' : 'Semanales'}</h1></div></header>
+      <header class="top"><div><div class="eyebrow">Estadísticas</div><h1>{mode === 'day' ? 'Diarias' : 'Semanales'}</h1></div><PrivacyButton /></header>
       <div class="seg wide">
         <button class={mode === 'day' ? 'on' : ''} onClick={() => setMode('day')}>Día</button>
         <button class={mode === 'week' ? 'on' : ''} onClick={() => setMode('week')}>Semana</button>

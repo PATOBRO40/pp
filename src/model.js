@@ -29,6 +29,7 @@ export const defaults = {
   minSeconds: 5,
   theme: 'dark',
   variant: 'aurora',
+  privacy: 'off', // off | data (oculta cifras) | all (también nombres e íconos)
 };
 
 const ORDER = defaults.cats.map((c) => c.id);

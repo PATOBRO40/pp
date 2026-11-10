@@ -43,6 +43,16 @@ function valueBelow(items, label, re = /^[+-]?\$[\d.]+,\d{2}$/) {
   return c ? moneyEs(c.str) : null;
 }
 
+/** Rendimiento ("+$…") que aparece debajo del saldo de una etiqueta, en la misma columna (formato de Nu). */
+function yieldBelow(items, label) {
+  const l = items.find((i) => i.str.trim() === label);
+  if (!l) return null;
+  const c = items
+    .filter((i) => i.page === l.page && /^\+\$[\d.]+,\d{2}$/.test(i.str.trim()) && Math.abs(i.x - l.x) < 30 && i.y < l.y && l.y - i.y < 70)
+    .sort((a, b) => b.y - a.y)[0];
+  return c ? moneyEs(c.str) : null;
+}
+
 export function detectBank(text) {
   if (/NEQUI S\.A\./i.test(text) && /dep[oó]sito de bajo monto/i.test(text)) return 'nequi';
   if (/Nu Colombia Compa[ñn][ií]a de Financiamiento/i.test(text) && /Movimientos/.test(text)) return 'nu';
@@ -109,6 +119,12 @@ function parseNu(lines, items) {
       nu: valueBelow(items, 'Dinero en tu Cuenta Nu'),
       cajitas: valueBelow(items, 'Dinero en tus cajitas'),
       cdt: valueBelow(items, 'Invertido en CDT Nu'),
+    },
+    // Rendimientos por bolsillo. El del CDT parece acumulado desde su apertura: se guarda aparte y no se suma.
+    yields: {
+      nu: yieldBelow(items, 'Dinero en tu Cuenta Nu'),
+      cajitas: yieldBelow(items, 'Dinero en tus cajitas'),
+      cdtAccum: yieldBelow(items, 'Invertido en CDT Nu'),
     },
   };
 }

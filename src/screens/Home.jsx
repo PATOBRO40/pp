@@ -1,4 +1,5 @@
 import { Icon } from '../components/Icon.jsx';
+import { PrivacyButton } from '../components/Privacy.jsx';
 import { CapBar } from '../components/CapBar.jsx';
 import { DAY, fmtClock, fmtDM, fmtDate, fmtWeekday, fmtDur, fmtTime, rangeTotals, startOfDay, startOfWeek } from '../time.js';
 import { activeSession, set, setMeta, toggleCat, useNow, useStore } from '../store.js';
@@ -27,7 +28,7 @@ export function Home() {
           <div class="eyebrow">{fmtDM(t)} · semana {fmtDM(ws)} – {fmtDM(ws + 6 * DAY)}</div>
           <h1>{fmtWeekday(t)}</h1>
         </div>
-        <div class="brand" aria-hidden="true">PP</div>
+        <PrivacyButton />
       </header>
 
       {st.dbError && (
@@ -71,7 +72,7 @@ export function Home() {
           <Icon name="clock" />
           <div>
             <b>¿Olvidaste finalizar?</b>
-            <span>Llevas {fmtDur(t - act.start)} en «{actCat.short}» desde las {fmtTime(act.start)}.</span>
+            <span class="pv">Llevas {fmtDur(t - act.start)} en «{actCat.short}» desde las {fmtTime(act.start)}.</span>
             <div class="banner-actions">
               <button onClick={() => toggleCat(act.cat)}>Finalizar ahora</button>
               <button onClick={() => set({ sheet: { type: 'edit', id: act.id } })}>Corregir hora</button>

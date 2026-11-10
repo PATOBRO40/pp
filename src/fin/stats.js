@@ -125,6 +125,114 @@ export function trendBars(f, key, n) {
   });
 }
 
+// ---------- Ahorro: saldos por mes, evolución y estadísticas ----------
+
+export const SAV_ACCOUNTS = [
+  { id: 'nequi', bank: 'nequi', name: 'Nequi', color: 4 },
+  { id: 'nu', bank: 'nu', name: 'Cuenta Nu', color: 1 },
+  { id: 'cajitas', bank: 'nu', name: 'Cajitas Nu', color: 2, saving: true },
+  { id: 'cdt', bank: 'nu', name: 'CDT Nu', color: 3, saving: true },
+];
+
+/** Periodos con algún extracto, del primero al último (sin huecos). */
+export function savingsPeriods(f) {
+  const ps = f.stmts.map((s) => periodOf(s.to, f.monthStart)).sort();
+  if (!ps.length) return [];
+  const out = [];
+  for (let k = ps[0]; k <= ps.at(-1); k = shiftPeriod(k, 1)) out.push(k);
+  return out;
+}
+
+/**
+ * Saldos al cierre de un periodo. Si falta el extracto de un banco ese mes, usa el último
+ * conocido y lo marca como "stale". null si aún no hay ningún extracto de esa cuenta.
+ */
+export function savingsAt(f, key) {
+  const last = {};
+  for (const s of f.stmts) {
+    const p = periodOf(s.to, f.monthStart);
+    if (p <= key && (!last[s.bank] || s.to > last[s.bank].to)) last[s.bank] = s;
+  }
+  const rows = SAV_ACCOUNTS.map((a) => {
+    const s = last[a.bank];
+    const v = s?.balances?.[a.id];
+    return { ...a, value: v ?? null, at: s?.to || null, stale: !!s && periodOf(s.to, f.monthStart) < key };
+  }).filter((r) => r.value != null);
+  const total = rows.reduce((a, r) => a + r.value, 0);
+  const saved = rows.filter((r) => r.saving).reduce((a, r) => a + r.value, 0);
+  return { key, rows, total, saved, has: rows.length > 0 };
+}
+
+const stmtFor = (f, bank, key) => f.stmts.find((s) => s.bank === bank && periodOf(s.to, f.monthStart) === key);
+
+/** Rendimientos de un periodo, por bolsillo. */
+export function yieldsAt(f, key) {
+  const cls = classified(f);
+  const out = [];
+  const nequi = f.movs.filter((m) => m.acct === 'nequi' && periodOf(m.date, f.monthStart) === key && cls.get(m.id).type === 'rendimiento')
+    .reduce((a, m) => a + m.amount, 0);
+  if (nequi) out.push({ id: 'nequi', name: 'Nequi', value: nequi });
+  const nu = stmtFor(f, 'nu', key);
+  if (nu) {
+    if (nu.yields?.cajitas != null) {
+      out.push({ id: 'cajitas', name: 'Cajitas Nu', value: nu.yields.cajitas });
+      out.push({ id: 'nu', name: 'Cuenta Nu', value: nu.yields.nu || 0 });
+    } else if (nu.summary?.yield) out.push({ id: 'nuall', name: 'Nu (cuenta y cajitas)', value: nu.summary.yield });
+    // El CDT: crecimiento de su saldo frente al mes anterior (el PDF muestra un acumulado)
+    const prev = stmtFor(f, 'nu', shiftPeriod(key, -1));
+    if (prev?.balances?.cdt != null && nu.balances?.cdt != null) {
+      out.push({ id: 'cdt', name: 'CDT Nu (crecimiento)', value: nu.balances.cdt - prev.balances.cdt });
+    }
+  }
+  return { rows: out, total: out.reduce((a, r) => a + r.value, 0) };
+}
+
+/** Una fila por periodo: saldo, cambio, de dónde vino, rendimientos y tasa de ahorro. */
+export function savingsRow(f, key) {
+  const at = savingsAt(f, key);
+  const prev = savingsAt(f, shiftPeriod(key, -1));
+  const s = periodStats(f, key);
+  const y = yieldsAt(f, key);
+  const growth = at.has && prev.has ? at.total - prev.total : null;
+  const own = s.income - s.spent; // lo que ahorraste de tus ingresos
+  return {
+    key, total: at.has ? at.total : null, saved: at.saved, growth, yield: y.total, own,
+    other: growth != null ? growth - own - y.total : null, // efectivo, otras cuentas, diferencias
+    rate: s.income > 0 ? own / s.income : null,
+    stale: at.rows.some((r) => r.stale),
+  };
+}
+
+/** Estadísticas de un rango de periodos (lista de claves en orden). */
+export function savingsStats(f, keys) {
+  const rows = keys.map((k) => savingsRow(f, k));
+  const withTotal = rows.filter((r) => r.total != null);
+  const first = withTotal[0];
+  const last = withTotal.at(-1);
+  const base = first ? savingsAt(f, shiftPeriod(first.key, -1)) : null;
+  const start = base?.has ? base.total : first?.total ?? null;
+  const growth = last && start != null ? last.total - start : null;
+  const grown = rows.filter((r) => r.growth != null);
+  const covered = base?.has ? rows : rows.slice(1);
+  const rates = rows.filter((r) => r.rate != null);
+  const yieldBy = {};
+  for (const k of keys) for (const y of yieldsAt(f, k).rows) yieldBy[y.name] = (yieldBy[y.name] || 0) + y.value;
+  return {
+    rows,
+    growth,
+    growthPct: growth != null && start > 0 ? growth / start : null,
+    // El desglose cubre los mismos meses que el crecimiento (sin mes anterior, el primero no cuenta)
+    own: covered.reduce((a, r) => a + r.own, 0),
+    yield: covered.reduce((a, r) => a + r.yield, 0),
+    covered: covered.length,
+    yieldBy: Object.entries(yieldBy).sort((a, b) => b[1] - a[1]),
+    avgOwn: rows.length ? rows.reduce((a, r) => a + r.own, 0) / rows.length : 0,
+    avgRate: rates.length ? rates.reduce((a, r) => a + r.rate, 0) / rates.length : null,
+    best: grown.length ? grown.reduce((a, r) => (r.growth > a.growth ? r : a)) : null,
+    worst: grown.length ? grown.reduce((a, r) => (r.growth < a.growth ? r : a)) : null,
+  };
+}
+
 /** Saldos según el último extracto de cada banco. */
 export function savings(f) {
   const last = {};

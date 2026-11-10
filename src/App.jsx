@@ -16,6 +16,7 @@ import { CategorySheet, GroupSheet } from './components/Config.jsx';
 import { Money } from './screens/Money.jsx';
 import { IncomeSheet, MovSheet, StatementSheet } from './components/FinSheets.jsx';
 import { ExportSheet, ImportPasswordDialog } from './components/Sheets.jsx';
+import { PrivacyDialog } from './components/Privacy.jsx';
 
 const TABS = [
   ['home', 'Inicio', 'home'],
@@ -58,7 +59,7 @@ function useCapAlerts() {
         levels.current[cap.key] = lvl;
       }
       if (msgs.length) {
-        toast(msgs.join(' · ') + (worst === 2 ? '. Es solo un aviso.' : '.'), { kind: worst === 2 ? 'over' : 'warn', long: true });
+        toast(msgs.join(' · ') + (worst === 2 ? '. Es solo un aviso.' : '.'), { kind: worst === 2 ? 'over' : 'warn', long: true, sensitive: true });
         if (s.sound) beep(worst === 2 ? 'over' : 'warn');
       }
     }, 1000);
@@ -76,7 +77,7 @@ function Toast({ t }) {
   return (
     <div class={`toast ${t.kind}`} key={t.id} role="status">
       <Icon name={t.kind === 'ok' || t.kind === 'info' ? 'check' : 'warn'} size={18} />
-      <span>{t.msg}</span>
+      <span class={t.sensitive ? 'pv' : ''}>{t.msg}</span>
       {t.action && <button onClick={() => { t.action.fn(); set({ toast: null }); }}>{t.action.label}</button>}
     </div>
   );
@@ -101,6 +102,13 @@ export function App() {
     return () => mq.removeEventListener('change', apply);
   }, [st.theme, st.variant]);
 
+  // Modo de privacidad: el CSS tapa cifras (data) o también nombres e íconos (all), salvo en Ajustes
+  useEffect(() => {
+    const p = ['data', 'all'].includes(st.privacy) ? st.privacy : null;
+    if (p) document.documentElement.dataset.privacy = p;
+    else delete document.documentElement.dataset.privacy;
+  }, [st.privacy]);
+
   // Aviso de versión nueva lista (la app no se actualiza sola)
   useEffect(() => {
     if (st.updateReady) toast('Hay una versión nueva de PP', { kind: 'info', long: true, action: { label: 'Actualizar', fn: applyUpdate } });
@@ -113,7 +121,7 @@ export function App() {
   return (
     <>
       <div class="ambient" aria-hidden="true" />
-      {!st.ready ? <div class="splash"><div class="brand">PP</div></div> : <main key={st.tab}><Screen /></main>}
+      {!st.ready ? <div class="splash"><div class="brand">PP</div></div> : <main key={st.tab} data-tab={st.tab}><Screen /></main>}
       {st.ready && <nav class="tabbar">
         {TABS.map(([id, label, icon]) => (
           <button key={id} class={st.tab === id ? 'on' : ''} onClick={() => { set({ tab: id }); window.scrollTo(0, 0); }}>
@@ -131,6 +139,7 @@ export function App() {
       {st.sheet?.type === 'import' && <ImportDialog parsed={st.sheet.parsed} />}
       {st.sheet?.type === 'importpw' && <ImportPasswordDialog encrypted={st.sheet.encrypted} />}
       {st.sheet?.type === 'export' && <ExportSheet />}
+      {st.sheet?.type === 'privacy' && <PrivacyDialog />}
       {st.sheet?.type === 'stmt' && <StatementSheet results={st.sheet.results} />}
       {st.sheet?.type === 'mov' && <MovSheet key={st.sheet.id || 'new'} id={st.sheet.id} />}
       {st.sheet?.type === 'income' && <IncomeSheet key={st.sheet.id || 'new'} id={st.sheet.id} />}

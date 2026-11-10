@@ -1,6 +1,7 @@
 // Hojas de Dinero: vista previa de extractos, detalle/registro de un movimiento e ingreso fijo.
 import { useState } from 'preact/hooks';
 import { Icon } from './Icon.jsx';
+import { HIDE } from './Privacy.jsx';
 import { newId, set, setFin, toast, useStore } from '../store.js';
 import { ACCOUNTS, acctName, finCat, fmtMoney, fmtSigned, TYPES } from '../fin/model.js';
 import { classified } from '../fin/classify.js';
@@ -56,7 +57,7 @@ export function StatementSheet({ results }) {
               <div class="row-stat"><span>Movimientos</span><b>{s.rows.length}</b></div>
               <div class="row-stat"><span>Nuevos</span><b>{p.fresh}</b></div>
               {p.dup > 0 && <div class="row-stat"><span>Ya importados (se omiten)</span><b>{p.dup}</b></div>}
-              <div class="row-stat"><span>Saldo al cierre</span><b>{fmtMoney(s.summary.closing || 0, st.fin.hide)}</b></div>
+              <div class="row-stat"><span>Saldo al cierre</span><b>{fmtMoney(s.summary.closing || 0, HIDE())}</b></div>
               {s.check.ok
                 ? <p class="msg ok">Cuadra con el resumen del extracto: entradas, salidas y saldo final.</p>
                 : <p class="msg warn">{s.check.problems.join(' ')} Puedes importarlo igual y revisar.</p>}
@@ -111,7 +112,7 @@ function MovDetail({ f, m }) {
         <div class="grab" />
         <div class="mov-head">
           <h2>{prettyDesc(m)}</h2>
-          <div class={`mov-big ${m.amount > 0 ? 'pos' : ''}`}>{fmtSigned(m.amount, f.hide)}</div>
+          <div class={`mov-big ${m.amount > 0 ? 'pos' : ''}`}>{fmtSigned(m.amount, HIDE())}</div>
           <small>{m.date} · {acctName(m.acct)}{isManual ? ' · registro manual' : ''}</small>
         </div>
 

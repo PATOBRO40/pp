@@ -39,7 +39,7 @@ export function mergeStatement(f, st) {
   }
   const stmt = {
     key: src, bank: st.bank, from: st.period.from, to: st.period.to,
-    summary: st.summary, balances: st.balances, importedAt: Date.now(),
+    summary: st.summary, balances: st.balances, yields: st.yields || null, importedAt: Date.now(),
   };
   return {
     ...f,

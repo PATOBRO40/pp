@@ -162,7 +162,7 @@ export function FinConfig({ back }) {
     toast('Extracto quitado', { action: { label: 'Deshacer', fn: () => setFin(() => prev) } });
   };
   return (
-    <div class="screen">
+    <div class="screen no-privacy">
       <header class="top">
         <button class="round sm" onClick={back} aria-label="Volver"><Icon name="left" size={18} /></button>
         <div class="grow"><div class="eyebrow">Dinero</div><h1>Configurar</h1></div>
@@ -177,7 +177,6 @@ export function FinConfig({ back }) {
         <Row label="El mes empieza el día" hint="Ej. tu día de pago">
           <Stepper value={f.monthStart} step={1} min={1} max={28} onChange={(v) => setFin({ monthStart: v })} />
         </Row>
-        <Row label="Ocultar montos"><Toggle on={f.hide} onChange={(v) => setFin({ hide: v })} /></Row>
       </section>
 
       <h3 class="sec">Ingresos</h3>
@@ -192,7 +191,7 @@ export function FinConfig({ back }) {
         <div class="field"><span>Ingresos fijos mensuales</span></div>
         {f.incomes.map((i) => (
           <button class="cat-row" key={i.id} onClick={() => set({ sheet: { type: 'income', id: i.id } })}>
-            <span class="cat-row-main"><b>{i.name}</b><small>{fmtMoney(i.amount, f.hide)} · día {i.day} · {acctName(i.acct)} · desde {periodLabel(i.from, 1)}</small></span>
+            <span class="cat-row-main"><b>{i.name}</b><small>{fmtMoney(i.amount)} · día {i.day} · {acctName(i.acct)} · desde {periodLabel(i.from, 1)}</small></span>
             <Icon name="right" size={16} />
           </button>
         ))}

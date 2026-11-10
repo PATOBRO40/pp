@@ -1,10 +1,11 @@
 // Pestaña Dinero: resumen del mes, movimientos, ahorro, pendientes por revisar y configuración.
 import { useRef } from 'preact/hooks';
 import { Icon } from '../components/Icon.jsx';
+import { HIDE, PrivacyButton } from '../components/Privacy.jsx';
 import { set, setFin, toast, useStore } from '../store.js';
 import { acctName, finCat, fmtMoney, fmtSigned, TYPES } from '../fin/model.js';
 import { classified } from '../fin/classify.js';
-import { currentPeriod, latestPeriod, periodLabel, periodOf, periodStats, reviewList, savings, savingsHistory, shiftPeriod, trendBars } from '../fin/stats.js';
+import { SAV_ACCOUNTS, currentPeriod, latestPeriod, periodLabel, periodOf, periodStats, reviewList, savingsAt, savingsPeriods, savingsRow, savingsStats, shiftPeriod, trendBars, yieldsAt } from '../fin/stats.js';
 import { readStatements } from '../fin/flow.js';
 import { applyCorrection } from '../fin/actions.js';
 import { FinConfig } from './FinConfig.jsx';
@@ -51,7 +52,7 @@ function CatBars({ f, s, onPick }) {
         const pct = s.spent > 0 ? Math.round((v / s.spent) * 100) : 0;
         return (
           <button class="brk btn-reset" key={c.id} style={{ '--c': `var(--p${c.color})` }} onClick={() => onPick(c.id)}>
-            <div class="brk-top"><i class="dot" /><span>{c.name}</span><b>{fmtMoney(v, f.hide)}</b><em>{pct}%</em></div>
+            <div class="brk-top"><i class="dot" /><span>{c.name}</span><b>{fmtMoney(v, HIDE())}</b><em>{pct}%</em></div>
             <div class="brk-track"><div style={{ width: `${Math.max(0, pct)}%` }} /></div>
           </button>
         );
@@ -87,9 +88,9 @@ function Trend({ f, k, n, setN }) {
         </div>
         <div class="taxis">{bars.map((x) => <span key={x.id}>{x.label}</span>)}</div>
         <div class="trend-sum">
-          <div><b>{fmtMoney(spent, f.hide)}</b><span>gastado</span></div>
-          <div><b>{fmtMoney(income, f.hide)}</b><span>ingresos</span></div>
-          <div><b>{fmtMoney(spent / bars.length, f.hide)}</b><span>gasto prom. por {unit}</span></div>
+          <div><b>{fmtMoney(spent, HIDE())}</b><span>gastado</span></div>
+          <div><b>{fmtMoney(income, HIDE())}</b><span>ingresos</span></div>
+          <div><b>{fmtMoney(spent / bars.length, HIDE())}</b><span>gasto prom. por {unit}</span></div>
         </div>
       </section>
     </>
@@ -104,7 +105,7 @@ function Summary({ f, k, setK, go, n, setN }) {
     <>
       <PeriodNav k={k} setK={setK} f={f} />
       <section class="hero">
-        <div class="hero-num money">{fmtMoney(s.spent, f.hide)}</div>
+        <div class="hero-num money">{fmtMoney(s.spent, HIDE())}</div>
         <div class="hero-sub">
           gastado en {periodLabel(k, f.monthStart)}
           {delta != null && <em class={`delta ${delta <= 0 ? 'up' : 'down'}`}>{delta >= 0 ? '▲' : '▼'} {Math.abs(delta)}% vs. mes anterior</em>}
@@ -116,9 +117,9 @@ function Summary({ f, k, setK, go, n, setN }) {
       </section>
 
       <div class="kpis three">
-        <div class="kpi"><b>{fmtMoney(s.income, f.hide)}</b><span>ingresos</span></div>
-        <div class="kpi"><b>{fmtMoney(s.yield, f.hide)}</b><span>rendimientos</span></div>
-        <div class="kpi"><b class={s.balance >= 0 ? 'pos' : 'neg'}>{fmtSigned(s.balance, f.hide)}</b><span>balance</span></div>
+        <div class="kpi"><b>{fmtMoney(s.income, HIDE())}</b><span>ingresos</span></div>
+        <div class="kpi"><b>{fmtMoney(s.yield, HIDE())}</b><span>rendimientos</span></div>
+        <div class="kpi"><b class={s.balance >= 0 ? 'pos' : 'neg'}>{fmtSigned(s.balance, HIDE())}</b><span>balance</span></div>
       </div>
 
       {s.count > 0 && !f.incomes.length && f.recargas === 'propia' && (
@@ -139,7 +140,7 @@ function Summary({ f, k, setK, go, n, setN }) {
         <>
           <h3 class="sec">A quién y dónde más gastas</h3>
           <section class="panel tight">
-            {s.top.map(([p, v]) => <div class="row-stat" key={p}><span class="ellip">{titleCase(p)}</span><b>{fmtMoney(v, f.hide)}</b></div>)}
+            {s.top.map(([p, v]) => <div class="row-stat" key={p}><span class="ellip pn">{titleCase(p)}</span><b>{fmtMoney(v, HIDE())}</b></div>)}
           </section>
         </>
       )}
@@ -166,7 +167,7 @@ export function MovRow({ f, m, c }) {
         <b>{prettyDesc(m)}</b>
         <small>{label} · {acctName(m.acct)}{!c.manual && c.conf !== 'alta' ? <em class={`conf ${c.conf}`}> · revisar</em> : ''}</small>
       </span>
-      <span class={`mov-amt ${m.amount > 0 ? 'pos' : ''}`}>{fmtSigned(m.amount, f.hide)}</span>
+      <span class={`mov-amt ${m.amount > 0 ? 'pos' : ''}`}>{fmtSigned(m.amount, HIDE())}</span>
     </button>
   );
 }
@@ -208,36 +209,127 @@ function Movements({ f, k, setK, filter }) {
   );
 }
 
-function Savings({ f, k }) {
-  const sv = savings(f);
-  const keys = Array.from({ length: 6 }, (_, i) => shiftPeriod(k, i - 5));
-  const hist = savingsHistory(f, keys);
-  const max = Math.max(1, ...hist.map((h) => h.value || 0));
-  const s = periodStats(f, k);
-  if (!sv.rows.length) return <div class="empty"><Icon name="wallet" size={30} /><span>Importa un extracto para ver tus saldos.</span></div>;
+const RANGES = [[3, '3 meses'], [6, '6 meses'], [12, '12 meses'], [0, 'Todo']];
+const pct = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(Math.round(x * 1000) / 10).toLocaleString('es-CO')}%`;
+const short = (k) => periodLabel(k, 1).slice(0, 3);
+
+function Savings({ f, k, setK }) {
+  const st = useStore();
+  const periods = savingsPeriods(f);
+  if (!periods.length) return <div class="empty"><Icon name="wallet" size={30} /><span>Importa un extracto para ver tus saldos.</span></div>;
+  // Mes que se muestra: el elegido, o el último con extracto si el elegido es anterior a todos
+  const sk = k < periods[0] ? periods.at(-1) : k;
+  const at = savingsAt(f, sk);
+  const prev = savingsAt(f, shiftPeriod(sk, -1));
+  const focus = st.finAcct || null;
+  const range = st.finSavRange ?? 6;
+  const upto = periods.filter((p) => p <= sk);
+  const keys = range === 0 ? upto : upto.slice(-range);
+  const stats = savingsStats(f, keys);
+  const series = keys.map((key) => ({ key, at: savingsAt(f, key) }));
+  const val = (a, id) => a.rows.find((r) => r.id === id)?.value ?? 0;
+  const max = Math.max(1, ...series.map((x) => (focus ? val(x.at, focus) : x.at.total)));
+  const y = yieldsAt(f, sk);
+  const row = savingsRow(f, sk);
+  const hide = HIDE();
+  const accts = SAV_ACCOUNTS.filter((a) => series.some((x) => x.at.rows.some((r) => r.id === a.id)));
+
   return (
     <>
+      <PeriodNav k={sk} setK={setK} f={f} />
       <section class="hero">
-        <div class="hero-num money">{fmtMoney(sv.total, f.hide)}</div>
-        <div class="hero-sub">en tus cuentas según los últimos extractos</div>
-      </section>
-      <div class="kpis three">
-        <div class="kpi"><b>{fmtMoney(sv.saved, f.hide)}</b><span>ahorrado (cajitas y CDT)</span></div>
-        <div class="kpi"><b>{fmtMoney(s.yield, f.hide)}</b><span>rendimientos del mes</span></div>
-        <div class="kpi"><b>{s.income > 0 ? `${Math.round((s.balance / (s.income + s.yield || 1)) * 100)}%` : '—'}</b><span>tasa de ahorro</span></div>
-      </div>
-      <h3 class="sec">Por cuenta</h3>
-      <section class="panel tight">
-        {sv.rows.map((r) => <div class="row-stat" key={r.id}><span>{r.name}<small class="muted"> · al {fmtDate(r.at)}</small></span><b>{fmtMoney(r.value || 0, f.hide)}</b></div>)}
-        <div class="row-stat total"><span>Total</span><b>{fmtMoney(sv.total, f.hide)}</b></div>
-      </section>
-      <h3 class="sec">Saldo al cierre · 6 meses</h3>
-      <section class="panel trend">
-        <div class="tbars">
-          {hist.map((h, i) => <div class="tcol" key={h.key}><div class={`tbar ${i === 5 ? 'cur' : ''}`} style={{ height: `${((h.value || 0) / max) * 100}%` }} /></div>)}
+        <div class="hero-num money">{fmtMoney(at.total, hide)}</div>
+        <div class="hero-sub">
+          en tus cuentas al cierre
+          {row.growth != null && <em class={`delta ${row.growth >= 0 ? 'up' : 'down'}`}>{row.growth >= 0 ? '▲' : '▼'} {fmtMoney(Math.abs(row.growth), hide)} vs. mes anterior</em>}
         </div>
-        <div class="taxis">{keys.map((x) => <span key={x}>{periodLabel(x, 1).slice(0, 3)}</span>)}</div>
       </section>
+
+      <div class="kpis three">
+        <div class="kpi"><b>{fmtMoney(at.saved, hide)}</b><span>ahorrado (cajitas y CDT)</span></div>
+        <div class="kpi"><b>{fmtMoney(y.total, hide)}</b><span>rendimientos del mes</span></div>
+        <div class="kpi"><b>{row.rate != null ? `${Math.round(row.rate * 100)}%` : '—'}</b><span>tasa de ahorro</span></div>
+      </div>
+
+      <h3 class="sec">Por cuenta</h3>
+      <section class="panel list">
+        {at.rows.map((r) => {
+          const p = prev.rows.find((x) => x.id === r.id);
+          const d = p ? r.value - p.value : null;
+          return (
+            <button class={`acct ${focus === r.id ? 'on' : ''}`} key={r.id} style={{ '--c': `var(--p${r.color})` }}
+              onClick={() => set({ finAcct: focus === r.id ? null : r.id })}>
+              <i class="dot" />
+              <span class="acct-main"><b>{r.name}</b><small>{r.stale ? `sin extracto de este mes · último al ${fmtDate(r.at)}` : `al ${fmtDate(r.at)}`}</small></span>
+              <span class="acct-val"><b>{fmtMoney(r.value, hide)}</b>{d != null && d !== 0 && <small class={d > 0 ? 'pos' : 'neg'}>{fmtSigned(d, hide)}</small>}</span>
+            </button>
+          );
+        })}
+        <div class="row-stat total"><span>Total</span><b>{fmtMoney(at.total, hide)}</b></div>
+      </section>
+      <p class="fine">Toca una cuenta para ver solo su evolución.</p>
+
+      <div class="sec-row">
+        <h3 class="sec">Evolución</h3>
+        <div class="seg small">{RANGES.map(([v, l]) => <button key={v} class={range === v ? 'on' : ''} onClick={() => set({ finSavRange: v })}>{l}</button>)}</div>
+      </div>
+      <section class="panel trend">
+        <div class="panel-title">{focus ? SAV_ACCOUNTS.find((a) => a.id === focus).name : 'Saldo total por cuenta'}
+          {focus && <button class="link sm" onClick={() => set({ finAcct: null })}>ver todas</button>}
+        </div>
+        <div class="tbars">
+          {series.map((x) => (
+            <button class="tcol btn-reset" key={x.key} onClick={() => setK(x.key)} aria-label={periodLabel(x.key, 1)}>
+              <div class={`sstack ${x.key === sk ? 'cur' : ''}`} style={{ height: `${((focus ? val(x.at, focus) : x.at.total) / max) * 100}%` }}>
+                {(focus ? accts.filter((a) => a.id === focus) : accts).map((a) => (val(x.at, a.id) > 0
+                  ? <span key={a.id} style={{ flex: val(x.at, a.id), background: `var(--p${a.color})` }} /> : null))}
+              </div>
+            </button>
+          ))}
+        </div>
+        <div class="taxis">{series.map((x) => <span key={x.key}>{short(x.key)}</span>)}</div>
+        {!focus && <div class="legend">{accts.map((a) => <span key={a.id} style={{ '--c': `var(--p${a.color})` }}><i class="dot" />{a.name}</span>)}</div>}
+      </section>
+
+      <h3 class="sec">Estadísticas · {range === 0 ? 'todo el historial' : `${keys.length} ${keys.length === 1 ? 'mes' : 'meses'}`}</h3>
+      <section class="panel tight">
+        <div class="row-stat"><span>Crecimiento del saldo</span><b class={stats.growth >= 0 ? 'pos' : 'neg'}>{stats.growth != null ? `${fmtSigned(stats.growth, hide)}${stats.growthPct != null ? ` (${pct(stats.growthPct)})` : ''}` : '—'}</b></div>
+        <div class="row-stat sub"><span>De tus ingresos menos gastos</span><b>{fmtSigned(stats.own, hide)}</b></div>
+        <div class="row-stat sub"><span>De rendimientos</span><b>{fmtSigned(stats.yield, hide)}</b></div>
+        <div class="row-stat"><span>Ahorro promedio por mes</span><b>{fmtSigned(stats.avgOwn, hide)}</b></div>
+        <div class="row-stat"><span>Tasa de ahorro promedio</span><b>{stats.avgRate != null ? `${Math.round(stats.avgRate * 100)}%` : '—'}</b></div>
+        {stats.best && keys.length > 1 && <div class="row-stat"><span>Mejor mes</span><b>{periodLabel(stats.best.key, 1)} · {fmtSigned(stats.best.growth, hide)}</b></div>}
+        {stats.worst && keys.length > 1 && stats.worst.key !== stats.best?.key && <div class="row-stat"><span>Mes más flojo</span><b>{periodLabel(stats.worst.key, 1)} · {fmtSigned(stats.worst.growth, hide)}</b></div>}
+      </section>
+
+      {stats.covered < keys.length && <p class="fine">El crecimiento y su desglose empiezan en {periodLabel(keys[1] || keys[0], 1)}: del primer mes no hay saldo anterior con qué comparar.</p>}
+      {stats.yieldBy.length > 0 && (
+        <>
+          <h3 class="sec">Rendimientos por bolsillo</h3>
+          <section class="panel tight">
+            {stats.yieldBy.map(([n, v]) => <div class="row-stat" key={n}><span>{n}</span><b>{fmtMoney(v, hide)}</b></div>)}
+            <div class="row-stat total"><span>Total</span><b>{fmtMoney(stats.yield, hide)}</b></div>
+          </section>
+          <p class="fine">El CDT se mide por el crecimiento de su saldo mes a mes: el extracto muestra un rendimiento acumulado.</p>
+        </>
+      )}
+
+      <h3 class="sec">Historial de extractos</h3>
+      <section class="panel list">
+        <div class="hist head"><span>Mes</span><span>Saldo</span><span>Cambio</span><span>Tasa</span></div>
+        {[...periods].reverse().map((key) => {
+          const r = savingsRow(f, key);
+          return (
+            <button class={`hist ${key === sk ? 'on' : ''}`} key={key} onClick={() => setK(key)}>
+              <span>{periodLabel(key, 1)}{r.stale ? ' *' : ''}</span>
+              <span>{fmtMoney(r.total || 0, hide)}</span>
+              <span class={r.growth > 0 ? 'pos' : r.growth < 0 ? 'neg' : ''}>{r.growth != null ? fmtSigned(r.growth, hide) : '—'}</span>
+              <span>{r.rate != null ? `${Math.round(r.rate * 100)}%` : '—'}</span>
+            </button>
+          );
+        })}
+      </section>
+      {periods.some((p) => savingsRow(f, p).stale) && <p class="fine">* Falta el extracto de algún banco ese mes: se usa su último saldo conocido.</p>}
       <p class="fine">El efectivo no aparece aquí: solo lo que muestran los extractos.</p>
     </>
   );
@@ -275,7 +367,7 @@ function Review({ f }) {
               <button class="btn-reset rev-main" onClick={() => set({ sheet: { type: 'mov', id: m.id } })}>
                 <b>{prettyDesc(m)}</b><small>{fmtDate(m.date)} · {acctName(m.acct)} · {c.why}</small>
               </button>
-              <span class={`mov-amt ${m.amount > 0 ? 'pos' : ''}`}>{fmtSigned(m.amount, f.hide)}</span>
+              <span class={`mov-amt ${m.amount > 0 ? 'pos' : ''}`}>{fmtSigned(m.amount, HIDE())}</span>
             </div>
             {c.type === 'gasto' ? (
               <div class="chips small">
@@ -319,7 +411,7 @@ export function Money() {
       <header class="top">
         <div><div class="eyebrow">Dinero</div><h1>Tus finanzas</h1></div>
         <div class="top-actions">
-          <button class="round sm" onClick={() => setFin({ hide: !f.hide })} aria-label={f.hide ? 'Mostrar montos' : 'Ocultar montos'}><Icon name={f.hide ? 'eyeoff' : 'eye'} size={19} /></button>
+          <PrivacyButton small />
           <button class="round sm" onClick={() => setView('config')} aria-label="Configurar Dinero"><Icon name="gear" size={19} /></button>
         </div>
       </header>
@@ -336,7 +428,7 @@ export function Money() {
 
       {view === 'resumen' && <Summary f={f} k={k} setK={setK} go={setView} n={st.finTrend || 6} setN={(v) => set({ finTrend: v })} />}
       {view === 'movs' && <Movements f={f} k={k} setK={setK} filter={st.finFilter || 'all'} />}
-      {view === 'ahorro' && <Savings f={f} k={k} />}
+      {view === 'ahorro' && <Savings f={f} k={k} setK={setK} />}
       {view === 'revisar' && <Review f={f} />}
     </div>
   );

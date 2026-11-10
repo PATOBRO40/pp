@@ -95,11 +95,36 @@ Pestaña opcional que **solo funciona con el bloqueo activo**: sus datos viajan 
 - **Recargas desde otro banco**: por defecto son dinero propio y no cuentan como ingreso. Los ingresos fijos se configuran aparte.
 - **Montos** en centavos enteros. **Fechas** como `AAAA-MM-DD`. El mes puede empezar cualquier día.
 
+**Ahorro.** Muestra los saldos al cierre de cada mes con extracto, navegables por mes. Si falta el extracto de un banco ese mes, se usa el último saldo conocido y se marca. También incluye:
+
+- La evolución por cuenta (3, 6 o 12 meses, o todo).
+- El crecimiento y su origen: ingresos menos gastos y rendimientos.
+- La tasa de ahorro, el mejor mes y el historial.
+
+Rendimientos:
+
+- **Nu:** los extractos importados desde la 1.6 guardan aparte el de las cajitas y el de la cuenta; los anteriores muestran el total.
+- **CDT:** se mide por el crecimiento de su saldo, porque el PDF trae un acumulado.
+
 Respaldos: **Exportar** ofrece cifrado con contraseña (recomendado, AES-GCM + PBKDF2) o sin cifrar. El esquema 3 incluye `fin`.
 
 La versión compilada lleva una política CSP en `index.html` (`vite.config.js`): solo recursos propios y ninguna conexión externa.
 
 **Nunca subas extractos reales al repositorio:** `Extractos financieros/` y `*.pdf` están en `.gitignore`.
+
+## Privacidad en pantalla
+
+Con el ojo de cada pantalla, o en **Ajustes → Privacidad en pantalla**, hay tres modos:
+
+| Modo | Qué tapa |
+| --- | --- |
+| Mostrar todo | Nada |
+| Ocultar datos | Tiempos, montos, porcentajes y horas |
+| Ocultar todo | Además, los nombres de categorías, personas y comercios, y sus íconos |
+
+- Se guarda como ajuste (`privacy`) y sigue activo hasta cambiarlo.
+- No aplica en Ajustes ni en Dinero → Configurar.
+- Se implementa con CSS sobre `html[data-privacy]`: el texto sigue en el DOM pero no se ve. Es para que nadie lo lea de reojo, no es un cifrado.
 
 ## Publicar cambios
 

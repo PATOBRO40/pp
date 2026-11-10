@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Icon } from '../components/Icon.jsx';
+import { PrivacyChoice } from '../components/Privacy.jsx';
 import { Row, Stepper, Toggle } from '../components/Controls.jsx';
 import { catById } from '../model.js';
 import { fmtDM, fmtDur } from '../time.js';
@@ -116,6 +117,10 @@ export function Settings() {
           <Toggle on={st.sound} onChange={(v) => set({ sound: v })} />
         </Row>
       </section>
+
+      <h3 class="sec">Privacidad en pantalla</h3>
+      <section class="panel tight"><PrivacyChoice /></section>
+      <p class="fine">Se mantiene hasta que lo cambies. También se cambia con el ojo de cada pantalla. Ajustes siempre se ve completo.</p>
 
       <h3 class="sec">Seguridad</h3>
       <section class="panel">
