@@ -151,6 +151,7 @@ export function LockSheet({ mode }) {
       if (mode === 'off') await removeLock();
       else await savePassword(pw);
       close();
+      set({ settingsAuth: true }); // quien acaba de poner o cambiar la contraseña sigue dentro
       toast({ create: 'Bloqueo activado', change: 'Contraseña cambiada', off: 'Bloqueo quitado' }[mode], { kind: 'ok' });
     } catch {
       setErr('No se pudo guardar. Inténtalo de nuevo.');

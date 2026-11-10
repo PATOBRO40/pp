@@ -16,7 +16,7 @@ import { CategorySheet, GroupSheet } from './components/Config.jsx';
 import { Money } from './screens/Money.jsx';
 import { IncomeSheet, MovSheet, StatementSheet } from './components/FinSheets.jsx';
 import { ExportSheet, ImportPasswordDialog } from './components/Sheets.jsx';
-import { PrivacyDialog } from './components/Privacy.jsx';
+import { AuthGate, PrivacyDialog, requestSettingsAuth, settingsNeedAuth } from './components/Privacy.jsx';
 
 const TABS = [
   ['home', 'Inicio', 'home'],
@@ -117,14 +117,21 @@ export function App() {
   if (st.ready && st.locked) return <><div class="ambient" aria-hidden="true" /><LockScreen /></>;
 
   const Screen = { home: Home, log: Log, stats: Stats, money: Money, settings: Settings }[st.tab] || Home;
+  const gate = st.tab === 'settings' && settingsNeedAuth(st) && !st.settingsAuth;
 
   return (
     <>
       <div class="ambient" aria-hidden="true" />
-      {!st.ready ? <div class="splash"><div class="brand">PP</div></div> : <main key={st.tab} data-tab={st.tab}><Screen /></main>}
+      {!st.ready ? <div class="splash"><div class="brand">PP</div></div> : <main key={st.tab} data-tab={st.tab}>{gate ? <AuthGate flag="settingsAuth" title="Ajustes" /> : <Screen />}</main>}
       {st.ready && <nav class="tabbar">
         {TABS.map(([id, label, icon]) => (
-          <button key={id} class={st.tab === id ? 'on' : ''} onClick={() => { set({ tab: id }); window.scrollTo(0, 0); }}>
+          <button key={id} class={st.tab === id ? 'on' : ''} onClick={() => {
+            if (id === st.tab) return;
+            // Salir de una pantalla protegida retira la autorización
+            set({ tab: id, settingsAuth: false, finCfgAuth: false, ...(st.finView === 'config' ? { finView: 'resumen' } : {}) });
+            if (id === 'settings') requestSettingsAuth('settingsAuth');
+            window.scrollTo(0, 0);
+          }}>
             <Icon name={icon} size={23} /><span>{label}</span>
           </button>
         ))}

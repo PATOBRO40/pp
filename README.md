@@ -125,6 +125,7 @@ Con el ojo de cada pantalla, o en **Ajustes → Privacidad en pantalla**, hay tr
 - Se guarda como ajuste (`privacy`) y sigue activo hasta cambiarlo.
 - Cambiar de modo exige confirmar con Face ID (se pide al tocar la opción) o con la contraseña. Usa el mismo límite de intentos que la entrada. Sin bloqueo configurado, el cambio es directo.
 - No aplica en Ajustes ni en Dinero → Configurar.
+- **Ajustes y Dinero → Configurar quedan protegidos** mientras haya un modo de ocultar activo y bloqueo configurado: piden Face ID o la contraseña. Face ID se pide al tocar la pestaña o el engranaje. La autorización dura hasta salir de esa pantalla (`settingsAuth` y `finCfgAuth`, que no se guardan) y se retira al bloquear la app.
 - Se implementa con CSS sobre `html[data-privacy]`: el texto sigue en el DOM pero no se ve. Es para que nadie lo lea de reojo, no es un cifrado.
 
 ## Publicar cambios

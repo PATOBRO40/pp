@@ -14,6 +14,63 @@ export const PRIVACY = [
 /** ¿Hay que ocultar montos? (Dinero los formatea como $ ••••) */
 export const HIDE = () => getState().privacy === 'data' || getState().privacy === 'all';
 
+// ---------- Ajustes protegidos ----------
+// Con un modo de ocultar activo (y bloqueo configurado), entrar a Ajustes o a Dinero → Configurar
+// exige Face ID o contraseña. La autorización dura hasta salir de esa pantalla.
+
+/** ¿Hay que verificar para entrar a los ajustes? */
+export const settingsNeedAuth = (s = getState()) => (s.privacy === 'data' || s.privacy === 'all') && s.lock?.v === 2;
+
+/**
+ * Llamar directamente en el toque que abre la pantalla protegida: así Face ID puede pedirse
+ * enseguida (Safari exige un gesto). flag: 'settingsAuth' | 'finCfgAuth'.
+ */
+export function requestSettingsAuth(flag) {
+  const s = getState();
+  if (!settingsNeedAuth(s) || s[flag]) return;
+  if (hasBiometric(s.lock)) confirmBiometric().then(() => set({ [flag]: true })).catch(() => {});
+}
+
+/** Pantalla que reemplaza a los ajustes hasta verificar la identidad. */
+export function AuthGate({ flag, title }) {
+  const st = useStore();
+  const [pw, setPw] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const bio = hasBiometric(st.lock);
+  const ok = () => set({ [flag]: true });
+  const tryBio = async () => {
+    setErr('');
+    try { await confirmBiometric(); ok(); } catch { setErr('No se pudo verificar con Face ID. Usa tu contraseña.'); }
+  };
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!pw || busy) return;
+    setBusy(true);
+    const good = await checkPassword(pw);
+    setBusy(false);
+    setPw('');
+    if (good) ok();
+    else setErr(Date.now() < (getState().lock?.until || 0) ? 'Demasiados intentos. Espera un momento.' : 'Contraseña incorrecta.');
+  };
+  return (
+    <div class="screen">
+      <header class="top"><div><div class="eyebrow">Protegido</div><h1>{title}</h1></div></header>
+      <section class="panel stack auth-gate">
+        <div class="gate-ico"><Icon name="eyeoff" size={28} /></div>
+        <p>Tienes activo un modo de ocultar. Para entrar a {title.toLowerCase()}, confirma que eres tú.</p>
+        {bio && <button class="btn primary" onClick={tryBio}><Icon name="face" size={20} /> Usar Face ID</button>}
+        <form onSubmit={submit}>
+          <input type="password" placeholder="Contraseña" aria-label="Contraseña para entrar a los ajustes" autocomplete="current-password"
+            value={pw} onInput={(e) => setPw(e.currentTarget.value)} />
+          <button class={`btn ${bio ? 'ghost' : 'primary'}`} type="submit" disabled={!pw || busy}>{busy ? 'Verificando…' : 'Entrar'}</button>
+        </form>
+        {err && <p class="msg err">{err}</p>}
+      </section>
+    </div>
+  );
+}
+
 export function PrivacyButton({ small }) {
   const st = useStore();
   const on = st.privacy === 'data' || st.privacy === 'all';
@@ -39,7 +96,8 @@ export function PrivacyChoice() {
   const [busy, setBusy] = useState(false);
   const locked = st.lock?.v === 2;
   const bio = hasBiometric(st.lock);
-  const apply = (v) => { set({ privacy: v }); setPending(null); setPw(''); setErr(''); };
+  // Quien acaba de confirmar su identidad puede seguir en la pantalla donde está (p. ej. Ajustes)
+  const apply = (v) => { set({ privacy: v, settingsAuth: true, finCfgAuth: true }); setPending(null); setPw(''); setErr(''); };
 
   const tryBio = async (v) => {
     setErr('');

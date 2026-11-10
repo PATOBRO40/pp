@@ -1,7 +1,7 @@
 // Pestaña Dinero: resumen del mes, movimientos, ahorro, pendientes por revisar y configuración.
 import { useRef } from 'preact/hooks';
 import { Icon } from '../components/Icon.jsx';
-import { HIDE, PrivacyButton } from '../components/Privacy.jsx';
+import { AuthGate, HIDE, PrivacyButton, requestSettingsAuth, settingsNeedAuth } from '../components/Privacy.jsx';
 import { set, setFin, toast, useStore } from '../store.js';
 import { acctName, finCat, fmtMoney, fmtSigned, TYPES } from '../fin/model.js';
 import { classified } from '../fin/classify.js';
@@ -393,10 +393,17 @@ export function Money() {
   const fileRef = useRef(null);
   const view = st.finView || 'resumen';
   const k = st.finKey || latestPeriod(f);
-  const setView = (v) => { set({ finView: v }); window.scrollTo(0, 0); };
+  const setView = (v) => {
+    set({ finView: v, finCfgAuth: false });
+    if (v === 'config') requestSettingsAuth('finCfgAuth');
+    window.scrollTo(0, 0);
+  };
   const setK = (x) => set({ finKey: x });
   if (st.lock?.v !== 2) return <Gate />;
-  if (view === 'config') return <FinConfig back={() => setView('resumen')} />;
+  if (view === 'config') {
+    if (settingsNeedAuth(st) && !st.finCfgAuth) return <AuthGate flag="finCfgAuth" title="Configurar Dinero" />;
+    return <FinConfig back={() => setView('resumen')} />;
+  }
 
   const pending = reviewList(f).length;
   const onFiles = async (e) => {

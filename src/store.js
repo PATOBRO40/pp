@@ -158,7 +158,7 @@ export function openVault(master) {
 /** Bloquea la app. Con cifrado, guarda lo pendiente y borra de la memoria la clave y los datos. */
 export function lockApp() {
   if (state.locked) return;
-  apply({ locked: true, sheet: null, toast: null });
+  apply({ locked: true, sheet: null, toast: null, settingsAuth: false, finCfgAuth: false });
   if (!sealed() || !V.isOpen()) return;
   clearTimeout(settingsTimer);
   persist(writeVault);
