@@ -123,6 +123,7 @@ Con el ojo de cada pantalla, o en **Ajustes → Privacidad en pantalla**, hay tr
 | Ocultar todo | Además, los nombres de categorías, personas y comercios, y sus íconos |
 
 - Se guarda como ajuste (`privacy`) y sigue activo hasta cambiarlo.
+- Cambiar de modo exige confirmar con Face ID (se pide al tocar la opción) o con la contraseña. Usa el mismo límite de intentos que la entrada. Sin bloqueo configurado, el cambio es directo.
 - No aplica en Ajustes ni en Dinero → Configurar.
 - Se implementa con CSS sobre `html[data-privacy]`: el texto sigue en el DOM pero no se ve. Es para que nadie lo lea de reojo, no es un cifrado.
 
