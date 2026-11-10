@@ -25,7 +25,8 @@ El service worker solo se registra en la versión compilada. Por `http://IP-loca
 | `src/db.js` | IndexedDB (sesiones, ajustes, metadatos) |
 | `src/store.js` | Estado global; guarda solo los cambios en IndexedDB |
 | `src/backup.js` | Exportar e importar JSON |
-| `src/lock.js` | Bloqueo de entrada: contraseña y Face ID |
+| `src/lock.js` | Bloqueo de entrada: contraseña, Face ID y pantalla de privacidad |
+| `src/vault.js` | Cifrado AES-GCM de sesiones y ajustes |
 | `src/pwa.js` | Registro del service worker y actualizaciones |
 | `src/sw-template.js` | Service worker; `vite.config.js` le añade versión y lista de archivos |
 | `src/screens/`, `src/components/` | Interfaz |
@@ -57,11 +58,16 @@ Los datos viven solo en el almacenamiento de la app instalada, que es independie
 
 Formato: `{ app: "PP", schema: 2, exportedAt, settings, sessions }`. Si cambia la estructura, sube `schema` y añade la migración en `parseBackup`.
 
-## Bloqueo
+## Bloqueo y cifrado
 
-Opcional, en **Ajustes → Seguridad**. La contraseña se guarda como hash PBKDF2 y Face ID usa WebAuthn; la configuración está en la clave `lock` de IndexedDB y no entra en los respaldos.
+Opcional, en **Ajustes → Seguridad**. Al activarlo, sesiones y ajustes se guardan **cifrados** (AES-GCM de 256 bits) en la clave `vault` de IndexedDB, y se borra la copia en claro.
 
-Es un bloqueo de acceso, no cifrado: los datos en IndexedDB y los JSON exportados no van cifrados. Sin servidor no hay recuperación: si se olvida la contraseña y no hay Face ID, entrar exige borrar las sesiones.
+- Una clave maestra aleatoria cifra los datos. Se guarda envuelta con la contraseña (PBKDF2-SHA256, 310 000 iteraciones) y, si Face ID está activo, con el secreto de la extensión PRF de WebAuthn (requiere iOS 18 o posterior).
+- Al bloquear, la clave y los datos se borran de la memoria. En claro solo quedan el tema y el estilo (`meta.ui`), para dibujar la pantalla de bloqueo.
+- La configuración está en la clave `lock` y no entra en los respaldos. Los respaldos JSON van **sin cifrar**.
+- Sin servidor no hay recuperación: si se olvida la contraseña y no hay Face ID, entrar exige borrar sesiones y ajustes.
+- Un bloqueo de la versión 1.2–1.3 (solo hash, datos en claro) se migra al entrar con la contraseña. Face ID hay que volver a activarlo.
+- Al salir de la app, una pantalla de privacidad tapa el contenido para que la captura del selector de apps de iOS no muestre datos.
 
 La credencial de Face ID depende del dominio. Si la app cambia de dirección, hay que volver a activarla.
 

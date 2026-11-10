@@ -6,7 +6,8 @@ import { fmtDM, fmtDur } from '../time.js';
 import { addCategory, addGroup, resetSettings, set, setArchived, toast, updateCategory, updateGroup, useStore } from '../store.js';
 import { exportBackup, parseBackup } from '../backup.js';
 import { checkUpdate, isStandalone } from '../pwa.js';
-import { biometricAvailable, enrollBiometric, removeBiometric, setGrace } from '../lock.js';
+import { biometricAvailable, enrollBiometric, hasBiometric, removeBiometric, setGrace } from '../lock.js';
+import { bioError } from '../components/Lock.jsx';
 
 const VARIANTS = [['aurora', 'Aurora'], ['neon', 'Neón'], ['editorial', 'Editorial']];
 const GRACES = [[0, 'Al salir'], [60000, '1 min'], [300000, '5 min']];
@@ -35,8 +36,8 @@ export function Settings() {
     try {
       if (on) { await enrollBiometric(); toast('Face ID activado', { kind: 'ok' }); }
       else { await removeBiometric(); toast('Face ID desactivado'); }
-    } catch {
-      toast('No se pudo activar Face ID. Revisa que el Llavero de iCloud esté activo.', { kind: 'warn', long: true });
+    } catch (e) {
+      toast(bioError(e), { kind: 'warn', long: true });
     }
   };
 
@@ -117,12 +118,12 @@ export function Settings() {
 
       <h3 class="sec">Seguridad</h3>
       <section class="panel">
-        <Row label="Bloqueo con contraseña" hint={st.lock ? 'Activado' : 'Pide contraseña para entrar a la app'}>
+        <Row label="Bloqueo con contraseña" hint={st.lock ? 'Activado · datos cifrados' : 'Pide contraseña y cifra tus datos'}>
           <Toggle on={!!st.lock} onChange={() => set({ sheet: { type: 'lock', mode: st.lock ? 'off' : 'create' } })} />
         </Row>
         {st.lock && bio && (
           <Row label="Face ID" hint="Entrar sin escribir la contraseña">
-            <Toggle on={!!st.lock.credId} onChange={toggleBio} />
+            <Toggle on={hasBiometric(st.lock)} onChange={toggleBio} />
           </Row>
         )}
         {st.lock && (

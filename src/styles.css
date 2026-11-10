@@ -344,3 +344,14 @@ h1 { font-size: 30px; line-height: 1.1; margin-top: 4px; }
 .danger-zone input { background: var(--surface2); border: 0; border-radius: 12px; padding: 12px; outline: 0; }
 .row-stat b { white-space: nowrap; }
 .field .check.row span { text-transform: none; letter-spacing: 0; font-size: 15px; font-weight: 500; color: var(--text); }
+
+.msg.info { color: var(--text2); background: var(--surface2); }
+
+/* Pantalla de privacidad: tapa todo en cuanto la app pasa a segundo plano,
+   para que la captura del selector de apps de iOS no muestre datos. */
+html.covered body::after {
+  content: 'PP'; position: fixed; inset: 0; z-index: 10000;
+  display: grid; place-items: center;
+  background: var(--bg); color: var(--text);
+  font: 800 28px var(--f-display); letter-spacing: -.03em;
+}

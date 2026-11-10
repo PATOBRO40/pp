@@ -1,7 +1,24 @@
 import { useState } from 'preact/hooks';
 import { Icon } from './Icon.jsx';
 import { set, toast, useNow, useStore } from '../store.js';
-import { MIN_LENGTH, removeLock, savePassword, tryPassword, unlock, verifyBiometric, wipeAndUnlock } from '../lock.js';
+import {
+  MIN_LENGTH, NoPrfError, checkPassword, confirmBiometric, enrollBiometric, hasBiometric, isLegacy,
+  removeLock, savePassword, unlockWithBiometric, unlockWithPassword, wipeAndUnlock,
+} from '../lock.js';
+
+/** Tras cifrar los datos de una versión anterior, Face ID hay que volver a activarlo. */
+async function reEnrollBio() {
+  try {
+    await enrollBiometric();
+    toast('Face ID activado', { kind: 'ok' });
+  } catch (e) {
+    toast(bioError(e), { kind: 'warn', long: true });
+  }
+}
+
+export const bioError = (e) => (e instanceof NoPrfError
+  ? 'Este iPhone no permite usar Face ID con datos cifrados (requiere iOS 18 o posterior). Sigue entrando con tu contraseña.'
+  : 'No se pudo activar Face ID. Revisa que el Llavero de iCloud esté activo.');
 
 const fmtWait = (ms) => {
   const s = Math.ceil(ms / 1000);
@@ -18,25 +35,34 @@ export function LockScreen() {
   const [forgot, setForgot] = useState(false);
   const [txt, setTxt] = useState('');
   const wait = Math.max(0, (st.lock?.until || 0) - t);
-  const hasBio = !!st.lock?.credId;
+  const hasBio = hasBiometric(st.lock);
+  const legacy = isLegacy(st.lock);
 
   const submit = async (ev) => {
     ev.preventDefault();
     if (busy || wait || !pw) return;
     setBusy(true);
     setErr('');
-    const ok = await tryPassword(pw);
+    let r;
+    try {
+      r = await unlockWithPassword(pw);
+    } catch {
+      r = { ok: false, failed: true };
+    }
     setBusy(false);
     setPw('');
-    if (ok) unlock();
-    else setErr('Contraseña incorrecta.');
+    if (r.failed) setErr('No se pudieron abrir tus datos. Inténtalo de nuevo.');
+    else if (!r.ok) setErr('Contraseña incorrecta.');
+    else if (r.migrated) {
+      toast(r.hadBio ? 'Tus datos ya están cifrados. Vuelve a activar Face ID.' : 'Tus datos ya están cifrados.',
+        { kind: 'ok', long: true, action: r.hadBio ? { label: 'Activar', fn: reEnrollBio } : undefined });
+    }
   };
 
   const bio = async () => {
     setErr('');
     try {
-      await verifyBiometric();
-      unlock();
+      await unlockWithBiometric();
     } catch {
       setErr('No se pudo verificar con Face ID. Usa tu contraseña.');
     }
@@ -48,9 +74,11 @@ export function LockScreen() {
         <div class="lock-box">
           <h1>¿Olvidaste la contraseña?</h1>
           <p>No se puede recuperar porque no hay servidor. {hasBio ? 'Entra con Face ID y cámbiala en Ajustes.' : ''}</p>
-          <p>La otra opción es <b>borrar todas tus sesiones</b> y quitar el bloqueo. Luego podrás importar un respaldo.</p>
+          {legacy
+            ? <p>La otra opción es <b>borrar todas tus sesiones</b> y quitar el bloqueo. Luego podrás importar un respaldo.</p>
+            : <p>Tus datos están cifrados con ella. La otra opción es <b>borrar todas tus sesiones y ajustes</b> y quitar el bloqueo. Luego podrás importar un respaldo.</p>}
           <input type="text" placeholder="Escribe BORRAR" value={txt} autocapitalize="characters" onInput={(e) => setTxt(e.currentTarget.value)} />
-          <button class="btn danger-solid" disabled={txt.trim().toUpperCase() !== 'BORRAR'} onClick={wipeAndUnlock}>Borrar sesiones y entrar</button>
+          <button class="btn danger-solid" disabled={txt.trim().toUpperCase() !== 'BORRAR'} onClick={wipeAndUnlock}>Borrar datos y entrar</button>
           <button class="btn ghost" onClick={() => { setForgot(false); setTxt(''); }}>Volver</button>
         </div>
       </div>
@@ -62,6 +90,7 @@ export function LockScreen() {
       <div class="lock-box">
         <div class="brand">PP</div>
         <h1>Entrar a PP</h1>
+        {legacy && <p class="msg info">Actualización de seguridad: entra una vez con tu contraseña para cifrar tus datos.</p>}
         {hasBio && <button class="btn primary" onClick={bio}><Icon name="face" size={20} /> Entrar con Face ID</button>}
         <form onSubmit={submit}>
           <input type="password" placeholder="Contraseña" aria-label="Contraseña" autocomplete="current-password"
@@ -94,7 +123,7 @@ export function LockSheet({ mode }) {
   const bio = async () => {
     setErr('');
     try {
-      await verifyBiometric();
+      await confirmBiometric();
       setConfirmed(true);
     } catch {
       setErr('No se pudo verificar con Face ID.');
@@ -109,7 +138,7 @@ export function LockSheet({ mode }) {
     setBusy(true);
     setErr('');
     try {
-      if (needsCurrent && !(await tryPassword(current))) {
+      if (needsCurrent && !(await checkPassword(current))) {
         setErr(Date.now() < (st.lock.until || 0) ? 'Demasiados intentos. Espera un momento.' : 'La contraseña actual no es correcta.');
         setCurrent('');
         return;
@@ -132,14 +161,14 @@ export function LockSheet({ mode }) {
         <h2>{TITLES[mode]}</h2>
 
         {mode === 'create' && (
-          <p class="msg warn">Si olvidas la contraseña y no tienes Face ID, la única forma de entrar será borrar tus sesiones. Exporta un respaldo antes.</p>
+          <p class="msg warn">Tus datos se cifrarán con esta contraseña. Si la olvidas y no tienes Face ID, no se podrán recuperar: la única forma de entrar será borrarlos. Exporta un respaldo antes.</p>
         )}
         {needsCurrent && (
           <label class="field"><span>Contraseña actual</span>
             <input type="password" autocomplete="current-password" value={current} onInput={(e) => setCurrent(e.currentTarget.value)} />
           </label>
         )}
-        {needsCurrent && st.lock?.credId && (
+        {needsCurrent && hasBiometric(st.lock) && (
           <button type="button" class="btn ghost" onClick={bio}><Icon name="face" size={18} /> Confirmar con Face ID</button>
         )}
         {confirmed && <p class="msg ok">Identidad confirmada con Face ID.</p>}

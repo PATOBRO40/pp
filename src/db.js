@@ -1,6 +1,8 @@
 // Capa de persistencia sobre IndexedDB.
 //   sessions: una fila por sesión (keyPath "id")
-//   kv:       ajustes ("settings") y metadatos ("meta")
+//   kv:       ajustes ("settings"), metadatos ("meta") y bloqueo ("lock")
+// Con el bloqueo activo, sesiones y ajustes van cifrados en kv "vault" (ver vault.js)
+// y "sessions" y "settings" quedan vacíos.
 // Safari iOS a veces cierra la conexión al pasar la app a segundo plano,
 // por eso cada operación reabre la base y reintenta una vez si falla.
 
@@ -67,4 +69,25 @@ export function applySessions(puts, deletes) {
 
 export function setKV(key, value) {
   return run(['kv'], 'readwrite', (tx) => { tx.objectStore('kv').put(value, key); });
+}
+
+export function getKV(key) {
+  return run(['kv'], 'readonly', (tx) => tx.objectStore('kv').get(key));
+}
+
+/**
+ * Varios cambios en una sola transacción: o se aplican todos o ninguno.
+ * kv: { clave: valor }; un valor null borra la clave.
+ */
+export function commit({ clearSessions = false, putSessions = [], kv = {} }) {
+  return run(['sessions', 'kv'], 'readwrite', (tx) => {
+    const ss = tx.objectStore('sessions');
+    if (clearSessions) ss.clear();
+    putSessions.forEach((s) => ss.put(s));
+    const k = tx.objectStore('kv');
+    for (const [key, v] of Object.entries(kv)) {
+      if (v == null) k.delete(key);
+      else k.put(v, key);
+    }
+  });
 }

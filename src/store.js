@@ -2,6 +2,7 @@
 // automáticamente en IndexedDB (ver set()).
 import { useEffect, useState } from 'preact/hooks';
 import * as db from './db.js';
+import * as V from './vault.js';
 import { beep } from './audio.js';
 import { fmtDur } from './time.js';
 import { catById, defaults, liveCats, migrateSettings } from './model.js';
@@ -18,7 +19,7 @@ let state = {
   persisted: null,     // resultado de navigator.storage.persist()
   updateReady: false,  // hay una versión nueva del service worker esperando
   lock: null,          // configuración del bloqueo (ver lock.js); nunca va en los respaldos
-  locked: false,       // ¿se está mostrando la pantalla de bloqueo?
+  locked: false,       // ¿se está mostrando la pantalla de bloqueo? (con cifrado, los datos no están en memoria)
   sessions: [],
   meta: { installedAt: Date.now(), lastBackupAt: null, backupSnoozedUntil: 0, installHintDismissed: false },
   tab: 'home',
@@ -28,11 +29,38 @@ let state = {
 };
 const subs = new Set();
 const pick = (s) => Object.fromEntries(SETTING_KEYS.map((k) => [k, s[k]]));
+const freshDefaults = () => ({ ...pick(defaults), cats: defaults.cats.map((c) => ({ ...c })), groups: defaults.groups.map((g) => ({ ...g, cats: [...g.cats] })) });
+const VARIANTS = ['aurora', 'neon', 'editorial'];
+const THEMES = ['auto', 'dark', 'light'];
 let lastSettings = JSON.stringify(pick(state));
 let settingsTimer = null;
 let queue = Promise.resolve();
 
 export const getState = () => state;
+
+/** ¿Los datos van cifrados? (bloqueo activo en su formato actual) */
+const sealed = () => state.lock?.v === 2;
+
+/** Ejecuta en orden con las demás operaciones de disco. */
+function serial(fn) {
+  const p = queue.then(fn);
+  queue = p.catch(() => {});
+  return p;
+}
+
+/** Como serial(), pero marca dbError si falla un guardado. */
+function persist(fn) {
+  return serial(fn).then(
+    () => { if (state.dbError) apply({ dbError: false }); },
+    () => apply({ dbError: true }),
+  );
+}
+
+/** Guarda sesiones y ajustes cifrados, tal como estén al momento de escribir. */
+async function writeVault() {
+  if (!sealed() || !V.isOpen()) return;
+  await db.setKV('vault', await V.seal({ sessions: state.sessions, settings: pick(state) }));
+}
 
 function syncSessions(prev, next) {
   const before = new Map(prev.map((s) => [s.id, s]));
@@ -43,10 +71,7 @@ function syncSessions(prev, next) {
     if (before.get(s.id) !== s) puts.push(s);
   }
   const dels = prev.filter((s) => !ids.has(s.id)).map((s) => s.id);
-  queue = queue
-    .then(() => db.applySessions(puts, dels))
-    .then(() => { if (state.dbError) apply({ dbError: false }); })
-    .catch(() => apply({ dbError: true }));
+  persist(() => (sealed() ? writeVault() : db.applySessions(puts, dels)));
 }
 
 function apply(patch) {
@@ -59,29 +84,100 @@ export function set(patch) {
   const prev = state;
   const p = typeof patch === 'function' ? patch(prev) : patch;
   apply(p);
-  if (state.ready) {
-    if (state.sessions !== prev.sessions) syncSessions(prev.sessions, state.sessions);
-    const cur = JSON.stringify(pick(state));
-    if (cur !== lastSettings) {
-      lastSettings = cur;
-      clearTimeout(settingsTimer);
-      settingsTimer = setTimeout(() => {
-        queue = queue.then(() => db.setKV('settings', pick(state))).catch(() => apply({ dbError: true }));
-      }, 250);
-    }
+  if (!state.ready) return;
+  // Tema y estilo van también en claro: la pantalla de bloqueo los necesita antes de descifrar.
+  if (state.theme !== prev.theme || state.variant !== prev.variant) setMeta({ ui: { theme: state.theme, variant: state.variant } });
+  if (sealed() && !V.isOpen()) return; // bloqueada: no hay nada que guardar
+  if (state.sessions !== prev.sessions) syncSessions(prev.sessions, state.sessions);
+  const cur = JSON.stringify(pick(state));
+  if (cur !== lastSettings) {
+    lastSettings = cur;
+    clearTimeout(settingsTimer);
+    settingsTimer = setTimeout(() => {
+      persist(() => (sealed() ? writeVault() : db.setKV('settings', pick(state))));
+    }, 250);
   }
 }
 
 export function setMeta(patch) {
   const meta = { ...state.meta, ...patch };
   apply({ meta });
-  queue = queue.then(() => db.setKV('meta', meta)).catch(() => apply({ dbError: true }));
+  persist(() => db.setKV('meta', meta));
 }
 
 /** Guarda la configuración del bloqueo; solo cambia el estado si se escribió en disco. */
-export async function setLock(lock) {
-  await db.setKV('lock', lock);
-  apply({ lock });
+export function setLock(lock) {
+  return serial(async () => {
+    await db.setKV('lock', lock);
+    apply({ lock });
+  });
+}
+
+/** Activa el cifrado: cifra lo que hay y borra la copia en claro, todo en una transacción. */
+export function enableVault(lock, master) {
+  return serial(async () => {
+    await V.open(master);
+    try {
+      const vault = await V.seal({ sessions: state.sessions, settings: pick(state) });
+      await db.commit({ clearSessions: true, kv: { vault, settings: null, lock } });
+    } catch (e) {
+      V.close();
+      throw e;
+    }
+    apply({ lock });
+  }).then(() => setMeta({ ui: { theme: state.theme, variant: state.variant } }));
+}
+
+/** Descifra los datos guardados con la clave maestra y muestra la app. */
+export function openVault(master) {
+  return serial(async () => {
+    await V.open(master);
+    let data;
+    try {
+      const rec = await db.getKV('vault');
+      data = rec ? await V.unseal(rec) : { sessions: [], settings: null };
+    } catch (e) {
+      V.close();
+      throw e;
+    }
+    const settings = migrateSettings(data.settings);
+    apply({ ...freshDefaults(), ...(settings || {}), sessions: data.sessions || [], locked: false });
+    lastSettings = JSON.stringify(pick(state));
+    if (settings !== data.settings) persist(writeVault);
+  });
+}
+
+/** Bloquea la app. Con cifrado, guarda lo pendiente y borra de la memoria la clave y los datos. */
+export function lockApp() {
+  if (state.locked) return;
+  apply({ locked: true, sheet: null, toast: null });
+  if (!sealed() || !V.isOpen()) return;
+  clearTimeout(settingsTimer);
+  persist(writeVault);
+  serial(() => {
+    V.close();
+    apply({ ...freshDefaults(), theme: state.theme, variant: state.variant, sessions: [], dismissedForgot: null });
+  });
+}
+
+/** Quita el bloqueo: vuelve a guardar todo en claro y borra lo cifrado, en una transacción. */
+export function disableVault() {
+  return serial(async () => {
+    await db.commit({ clearSessions: true, putSessions: state.sessions, kv: { settings: pick(state), vault: null, lock: null } });
+    V.close();
+    apply({ lock: null, locked: false });
+  });
+}
+
+/** Contraseña olvidada: borra sesiones (y, si estaban cifrados, también los ajustes) y quita el bloqueo. */
+export function wipeData() {
+  return serial(async () => {
+    const settings = sealed() ? { ...freshDefaults(), theme: state.theme, variant: state.variant } : pick(state);
+    await db.commit({ clearSessions: true, kv: { settings, vault: null, lock: null } });
+    V.close();
+    apply({ ...settings, sessions: [], lock: null, locked: false, sheet: null, dismissedForgot: null });
+    lastSettings = JSON.stringify(pick(state));
+  });
 }
 
 /** Carga los datos guardados. Se llama una vez al arrancar. */
@@ -89,15 +185,27 @@ export async function init() {
   try {
     const { sessions, settings, meta, lock } = await db.loadAll();
     const m = { ...state.meta, ...(meta || {}) };
+    if (lock?.v === 2) {
+      // Cifrado: no hay nada que leer hasta que se desbloquee.
+      const ui = m.ui || {};
+      apply({
+        ...freshDefaults(),
+        theme: THEMES.includes(ui.theme) ? ui.theme : defaults.theme,
+        variant: VARIANTS.includes(ui.variant) ? ui.variant : defaults.variant,
+        sessions: [], meta: m, lock, locked: true, ready: true,
+      });
+      return;
+    }
     const loaded = migrateSettings(settings); // ajustes de versiones anteriores
     apply({ ...defaults, ...(loaded || {}), sessions, meta: m, lock, locked: !!lock, ready: true });
     lastSettings = JSON.stringify(pick(state));
-    if (loaded !== settings) queue = queue.then(() => db.setKV('settings', pick(state))).catch(() => apply({ dbError: true }));
+    if (loaded !== settings) persist(() => db.setKV('settings', pick(state)));
     if (!meta) setMeta({});
   } catch {
     apply({ ready: true, dbError: true });
+  } finally {
+    try { navigator.storage?.persist?.().then((p) => apply({ persisted: p })); } catch { /* sin API */ }
   }
-  try { navigator.storage?.persist?.().then((p) => apply({ persisted: p })); } catch { /* sin API */ }
 }
 
 export function useStore() {
