@@ -6,6 +6,7 @@ import * as V from './vault.js';
 import { beep } from './audio.js';
 import { fmtDur } from './time.js';
 import { catById, defaults, liveCats, migrateSettings } from './model.js';
+import { defaultFin, migrateFin } from './fin/model.js';
 
 export const now = () => Date.now();
 
@@ -21,6 +22,7 @@ let state = {
   lock: null,          // configuración del bloqueo (ver lock.js); nunca va en los respaldos
   locked: false,       // ¿se está mostrando la pantalla de bloqueo? (con cifrado, los datos no están en memoria)
   sessions: [],
+  fin: defaultFin(),   // Dinero: solo existe con el bloqueo activo (va dentro del cifrado)
   meta: { installedAt: Date.now(), lastBackupAt: null, backupSnoozedUntil: 0, installHintDismissed: false },
   tab: 'home',
   toast: null,
@@ -59,7 +61,7 @@ function persist(fn) {
 /** Guarda sesiones y ajustes cifrados, tal como estén al momento de escribir. */
 async function writeVault() {
   if (!sealed() || !V.isOpen()) return;
-  await db.setKV('vault', await V.seal({ sessions: state.sessions, settings: pick(state) }));
+  await db.setKV('vault', await V.seal({ sessions: state.sessions, settings: pick(state), fin: state.fin }));
 }
 
 function syncSessions(prev, next) {
@@ -89,14 +91,20 @@ export function set(patch) {
   if (state.theme !== prev.theme || state.variant !== prev.variant) setMeta({ ui: { theme: state.theme, variant: state.variant } });
   if (sealed() && !V.isOpen()) return; // bloqueada: no hay nada que guardar
   if (state.sessions !== prev.sessions) syncSessions(prev.sessions, state.sessions);
+  const finChanged = state.fin !== prev.fin && sealed();
   const cur = JSON.stringify(pick(state));
-  if (cur !== lastSettings) {
+  if (cur !== lastSettings || finChanged) {
     lastSettings = cur;
     clearTimeout(settingsTimer);
     settingsTimer = setTimeout(() => {
       persist(() => (sealed() ? writeVault() : db.setKV('settings', pick(state))));
     }, 250);
   }
+}
+
+/** Cambia los datos de Dinero: setFin((f) => ({ ...f, ... })). */
+export function setFin(fn) {
+  set((s) => ({ fin: typeof fn === 'function' ? fn(s.fin) : { ...s.fin, ...fn } }));
 }
 
 export function setMeta(patch) {
@@ -118,7 +126,7 @@ export function enableVault(lock, master) {
   return serial(async () => {
     await V.open(master);
     try {
-      const vault = await V.seal({ sessions: state.sessions, settings: pick(state) });
+      const vault = await V.seal({ sessions: state.sessions, settings: pick(state), fin: state.fin });
       await db.commit({ clearSessions: true, kv: { vault, settings: null, lock } });
     } catch (e) {
       V.close();
@@ -141,7 +149,7 @@ export function openVault(master) {
       throw e;
     }
     const settings = migrateSettings(data.settings);
-    apply({ ...freshDefaults(), ...(settings || {}), sessions: data.sessions || [], locked: false });
+    apply({ ...freshDefaults(), ...(settings || {}), sessions: data.sessions || [], fin: migrateFin(data.fin), locked: false });
     lastSettings = JSON.stringify(pick(state));
     if (settings !== data.settings) persist(writeVault);
   });
@@ -156,7 +164,7 @@ export function lockApp() {
   persist(writeVault);
   serial(() => {
     V.close();
-    apply({ ...freshDefaults(), theme: state.theme, variant: state.variant, sessions: [], dismissedForgot: null });
+    apply({ ...freshDefaults(), theme: state.theme, variant: state.variant, sessions: [], fin: defaultFin(), dismissedForgot: null });
   });
 }
 
@@ -175,7 +183,7 @@ export function wipeData() {
     const settings = sealed() ? { ...freshDefaults(), theme: state.theme, variant: state.variant } : pick(state);
     await db.commit({ clearSessions: true, kv: { settings, vault: null, lock: null } });
     V.close();
-    apply({ ...settings, sessions: [], lock: null, locked: false, sheet: null, dismissedForgot: null });
+    apply({ ...settings, sessions: [], fin: defaultFin(), lock: null, locked: false, sheet: null, dismissedForgot: null });
     lastSettings = JSON.stringify(pick(state));
   });
 }

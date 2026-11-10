@@ -1,5 +1,6 @@
 import { useState } from 'preact/hooks';
 import { Icon } from './Icon.jsx';
+import { hasFinData } from '../fin/model.js';
 import { set, toast, useNow, useStore } from '../store.js';
 import {
   MIN_LENGTH, NoPrfError, checkPassword, confirmBiometric, enrollBiometric, hasBiometric, isLegacy,
@@ -141,6 +142,10 @@ export function LockSheet({ mode }) {
       if (needsCurrent && !(await checkPassword(current))) {
         setErr(Date.now() < (st.lock.until || 0) ? 'Demasiados intentos. Espera un momento.' : 'La contraseña actual no es correcta.');
         setCurrent('');
+        return;
+      }
+      if (mode === 'off' && hasFinData(st.fin)) {
+        setErr('Primero borra los datos de Dinero (Dinero → Configurar): sin bloqueo no se pueden guardar cifrados.');
         return;
       }
       if (mode === 'off') await removeLock();

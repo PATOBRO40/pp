@@ -2,7 +2,8 @@ import { useState } from 'preact/hooks';
 import { Icon } from './Icon.jsx';
 import { HOUR, fmtDM, fmtDur, fromLocalInput, rangeTotals, startOfDay, startOfWeek, toLocalInput } from '../time.js';
 import { activeSession, deleteSession, newId, now, resetTime, saveSession, set, useNow, useStore } from '../store.js';
-import { applyImport } from '../backup.js';
+import { applyImport, decryptBackup, makeBackupFile, parseBackup, shareBackup } from '../backup.js';
+import { hasFinData } from '../fin/model.js';
 import { liveCats } from '../model.js';
 
 /** Hoja inferior para crear/editar una sesión. */
@@ -159,11 +160,99 @@ export function ImportDialog({ parsed }) {
           {parsed.skipped > 0 && ` Se omitieron ${parsed.skipped} registros inválidos.`}
           {parsed.settings && ' Incluye ajustes.'}
         </p>
+        {parsed.fin && hasFinData(parsed.fin) && (st.lock?.v === 2
+          ? <p>Incluye Dinero: {parsed.fin.movs.length} movimientos.</p>
+          : <p class="msg warn">Incluye datos de Dinero, pero solo se pueden importar con el bloqueo activado. Se importará solo el tiempo.</p>)}
         <p>Actualmente tienes {st.sessions.length} sesiones. Podrás deshacer justo después.</p>
-        <button class="btn primary" onClick={() => go('merge')} disabled={!n}>Combinar (agrega lo que falta)</button>
+        <button class="btn primary" onClick={() => go('merge')} disabled={!n && !(parsed.fin && hasFinData(parsed.fin))}>Combinar (agrega lo que falta)</button>
         <button class="btn danger-outline" style={{ marginTop: 0 }} onClick={() => go('replace')}>Reemplazar todo</button>
         <button class="btn ghost" onClick={close}>Cancelar</button>
       </div>
+    </div>
+  );
+}
+
+/** Exportar respaldo: cifrado con contraseña (recomendado) o sin cifrar. */
+export function ExportSheet() {
+  const st = useStore();
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const close = () => set({ sheet: null });
+  const prepare = async (e) => {
+    e.preventDefault();
+    if (pw.length < 6) return setErr('Usa al menos 6 caracteres.');
+    if (pw !== pw2) return setErr('Las contraseñas no coinciden.');
+    setErr('');
+    setBusy(true);
+    try { setFile(await makeBackupFile(pw)); } catch { setErr('No se pudo preparar el respaldo.'); }
+    setBusy(false);
+  };
+  // Compartir debe ocurrir directamente en el toque (iOS): por eso el archivo se prepara antes.
+  const share = async (f) => { await shareBackup(f); close(); };
+  return (
+    <div class="sheet-wrap" onClick={close}>
+      <form class="sheet" onClick={(ev) => ev.stopPropagation()} onSubmit={prepare}>
+        <div class="grab" />
+        <h2>Exportar respaldo</h2>
+        {!file ? (
+          <>
+            <p class="fine inline">Recomendado: cifrado con una contraseña. Sin ella, nadie puede leer el archivo (ni tú: no se puede recuperar).{hasFinData(st.fin) ? ' Incluye tus datos de Dinero.' : ''}</p>
+            <label class="field"><span>Contraseña del respaldo</span>
+              <input type="password" autocomplete="new-password" value={pw} onInput={(e) => setPw(e.currentTarget.value)} />
+            </label>
+            <label class="field"><span>Repítela</span>
+              <input type="password" autocomplete="new-password" value={pw2} onInput={(e) => setPw2(e.currentTarget.value)} />
+            </label>
+            {err && <p class="msg err">{err}</p>}
+            <button type="submit" class="btn primary" disabled={busy || !pw}>{busy ? 'Cifrando…' : 'Cifrar respaldo'}</button>
+            <button type="button" class="link" onClick={async () => share(await makeBackupFile())}>
+              Exportar sin cifrar{hasFinData(st.fin) ? ' (no recomendado: incluye tus finanzas)' : ''}
+            </button>
+          </>
+        ) : (
+          <>
+            <p class="msg ok">Respaldo cifrado listo. Guárdalo en Archivos o donde prefieras.</p>
+            <button type="button" class="btn primary" onClick={() => share(file)}><Icon name="up" size={18} /> Guardar respaldo</button>
+          </>
+        )}
+        <button type="button" class="btn ghost" onClick={close}>Cancelar</button>
+      </form>
+    </div>
+  );
+}
+
+/** Pide la contraseña de un respaldo cifrado. */
+export function ImportPasswordDialog({ encrypted }) {
+  const [pw, setPw] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const close = () => set({ sheet: null });
+  const open = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setErr('');
+    let text;
+    try { text = await decryptBackup(encrypted, pw); } catch { setBusy(false); return setErr('Contraseña incorrecta.'); }
+    const parsed = parseBackup(text);
+    setBusy(false);
+    if (parsed.error) return setErr(parsed.error);
+    set({ sheet: { type: 'import', parsed } });
+  };
+  return (
+    <div class="sheet-wrap center" onClick={close}>
+      <form class="dialog" onClick={(ev) => ev.stopPropagation()} onSubmit={open}>
+        <h2>Respaldo cifrado</h2>
+        <p>Escribe la contraseña con la que lo exportaste.</p>
+        <input type="password" placeholder="Contraseña del respaldo" value={pw} onInput={(e) => setPw(e.currentTarget.value)} />
+        {err && <p class="msg err">{err}</p>}
+        <div class="sheet-actions">
+          <button type="button" class="btn ghost" onClick={close}>Cancelar</button>
+          <button type="submit" class="btn primary" disabled={!pw || busy}>{busy ? 'Abriendo…' : 'Abrir'}</button>
+        </div>
+      </form>
     </div>
   );
 }

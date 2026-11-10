@@ -13,11 +13,15 @@ import { beep } from './audio.js';
 import { sum } from './stats.js';
 import { allCaps } from './model.js';
 import { CategorySheet, GroupSheet } from './components/Config.jsx';
+import { Money } from './screens/Money.jsx';
+import { IncomeSheet, MovSheet, StatementSheet } from './components/FinSheets.jsx';
+import { ExportSheet, ImportPasswordDialog } from './components/Sheets.jsx';
 
 const TABS = [
   ['home', 'Inicio', 'home'],
   ['log', 'Registro', 'list'],
   ['stats', 'Stats', 'chart'],
+  ['money', 'Dinero', 'wallet'],
   ['settings', 'Ajustes', 'gear'],
 ];
 
@@ -104,7 +108,7 @@ export function App() {
 
   if (st.ready && st.locked) return <><div class="ambient" aria-hidden="true" /><LockScreen /></>;
 
-  const Screen = { home: Home, log: Log, stats: Stats, settings: Settings }[st.tab];
+  const Screen = { home: Home, log: Log, stats: Stats, money: Money, settings: Settings }[st.tab] || Home;
 
   return (
     <>
@@ -125,6 +129,11 @@ export function App() {
       {st.sheet?.type === 'lock' && <LockSheet key={st.sheet.mode} mode={st.sheet.mode} />}
       {st.sheet?.type === 'wipe' && <WipeDialog />}
       {st.sheet?.type === 'import' && <ImportDialog parsed={st.sheet.parsed} />}
+      {st.sheet?.type === 'importpw' && <ImportPasswordDialog encrypted={st.sheet.encrypted} />}
+      {st.sheet?.type === 'export' && <ExportSheet />}
+      {st.sheet?.type === 'stmt' && <StatementSheet results={st.sheet.results} />}
+      {st.sheet?.type === 'mov' && <MovSheet key={st.sheet.id || 'new'} id={st.sheet.id} />}
+      {st.sheet?.type === 'income' && <IncomeSheet key={st.sheet.id || 'new'} id={st.sheet.id} />}
     </>
   );
 }

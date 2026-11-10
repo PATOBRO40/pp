@@ -2,3 +2,7 @@ node_modules/
 dist/
 .claude/
 *.log
+
+# Datos financieros personales: nunca al repositorio público
+Extractos financieros/
+*.pdf

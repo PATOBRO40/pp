@@ -69,6 +69,31 @@ export async function wrap(kek, master) {
   return { iv: toB64(iv), ct: toB64(new Uint8Array(ct)) };
 }
 
+// ---------- Respaldos cifrados con contraseña (independientes del bloqueo) ----------
+const AAD_BACKUP = enc.encode('pp-backup-v1');
+const BACKUP_ITER = 310000;
+
+export async function sealWithPassword(text, password) {
+  const salt = random(16);
+  const iv = random(12);
+  const k = await passwordKey(password, salt, BACKUP_ITER);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: AAD_BACKUP }, k, enc.encode(text)));
+  return { v: 1, kdf: { salt: toB64(salt), iterations: BACKUP_ITER }, iv: toB64(iv), ct: toB64Big(ct) };
+}
+
+/** Lanza un error si la contraseña no es la correcta. */
+export async function openWithPassword(e, password) {
+  const k = await passwordKey(password, fromB64(e.kdf.salt), e.kdf.iterations);
+  return dec.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(e.iv), additionalData: AAD_BACKUP }, k, fromB64(e.ct)));
+}
+
+/** Base64 para datos grandes (sin desbordar la pila). */
+function toB64Big(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
 /** Lanza un error si la clave no es la correcta (AES-GCM autentica). */
 export async function unwrap(kek, w) {
   return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(w.iv), additionalData: AAD_KEY }, kek, fromB64(w.ct)));

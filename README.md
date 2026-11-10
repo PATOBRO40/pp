@@ -26,7 +26,8 @@ El service worker solo se registra en la versión compilada. Por `http://IP-loca
 | `src/store.js` | Estado global; guarda solo los cambios en IndexedDB |
 | `src/backup.js` | Exportar e importar JSON |
 | `src/lock.js` | Bloqueo de entrada: contraseña, Face ID y pantalla de privacidad |
-| `src/vault.js` | Cifrado AES-GCM de sesiones y ajustes |
+| `src/vault.js` | Cifrado AES-GCM de sesiones, ajustes y Dinero; respaldos cifrados |
+| `src/fin/` | Dinero: lectura de extractos (`statements.js`, `pdf.js`), clasificación (`classify.js`), cálculos (`stats.js`) |
 | `src/pwa.js` | Registro del service worker y actualizaciones |
 | `src/sw-template.js` | Service worker; `vite.config.js` le añade versión y lista de archivos |
 | `src/screens/`, `src/components/` | Interfaz |
@@ -70,6 +71,35 @@ Opcional, en **Ajustes → Seguridad**. Al activarlo, sesiones y ajustes se guar
 - Al salir de la app, una pantalla de privacidad tapa el contenido para que la captura del selector de apps de iOS no muestre datos.
 
 La credencial de Face ID depende del dominio. Si la app cambia de dirección, hay que volver a activarla.
+
+## Dinero
+
+Pestaña opcional que **solo funciona con el bloqueo activo**: sus datos viajan dentro del cifrado. Mientras haya datos de Dinero, el bloqueo no se puede quitar.
+
+- **Importar extractos** mensuales en PDF de Nequi y Nu. pdf.js va incluido en la app y el archivo se lee en el teléfono: nunca se envía ni se conserva. Cada lector comprueba que los movimientos cuadren con el resumen del extracto. Reimportar no duplica nada.
+- **Solo se guarda** fecha, descripción, valor y cuenta, más el nombre del titular para reconocer las transferencias propias. No se guardan cédula, dirección, correo ni números de cuenta.
+- **Clasificación automática**, recalculada siempre a partir de reglas editables en Dinero → Configurar. El orden de prioridad es:
+  1. Corrección manual del movimiento.
+  2. Lo recordado para esa persona o comercio.
+  3. Transferencias propias, que se emparejan entre cuentas y no cuentan.
+  4. Reversos, que anulan su compra.
+  5. Rangos por monto para pagos a personas.
+  6. QR pequeños.
+  7. Comercios por texto.
+- **Rangos por defecto** para pagos a personas:
+  - Menos de $6.000: consumo básico mínimo.
+  - $6.000 a $8.000: transporte.
+  - $8.001 a $9.000: transporte, para revisar.
+  - $9.001 a $10.000: transporte, confianza baja.
+  - Más de $10.000: consumo básico medio.
+- **Recargas desde otro banco**: por defecto son dinero propio y no cuentan como ingreso. Los ingresos fijos se configuran aparte.
+- **Montos** en centavos enteros. **Fechas** como `AAAA-MM-DD`. El mes puede empezar cualquier día.
+
+Respaldos: **Exportar** ofrece cifrado con contraseña (recomendado, AES-GCM + PBKDF2) o sin cifrar. El esquema 3 incluye `fin`.
+
+La versión compilada lleva una política CSP en `index.html` (`vite.config.js`): solo recursos propios y ninguna conexión externa.
+
+**Nunca subas extractos reales al repositorio:** `Extractos financieros/` y `*.pdf` están en `.gitignore`.
 
 ## Publicar cambios
 

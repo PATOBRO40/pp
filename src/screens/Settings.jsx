@@ -4,7 +4,7 @@ import { Row, Stepper, Toggle } from '../components/Controls.jsx';
 import { catById } from '../model.js';
 import { fmtDM, fmtDur } from '../time.js';
 import { addCategory, addGroup, resetSettings, set, setArchived, toast, updateCategory, updateGroup, useStore } from '../store.js';
-import { exportBackup, parseBackup } from '../backup.js';
+import { parseBackup } from '../backup.js';
 import { checkUpdate, isStandalone } from '../pwa.js';
 import { biometricAvailable, enrollBiometric, hasBiometric, removeBiometric, setGrace } from '../lock.js';
 import { bioError } from '../components/Lock.jsx';
@@ -29,6 +29,7 @@ export function Settings() {
     if (!f) return;
     const parsed = parseBackup(await f.text());
     if (parsed.error) toast(parsed.error, { kind: 'warn', long: true });
+    else if (parsed.encrypted) set({ sheet: { type: 'importpw', encrypted: parsed.encrypted } });
     else set({ sheet: { type: 'import', parsed } });
   };
 
@@ -158,8 +159,8 @@ export function Settings() {
           {' '}{st.sessions.length} sesiones guardadas en este dispositivo.
         </p>
         <div class="btn-grid">
-          <button class="btn ghost" onClick={exportBackup}><Icon name="up" size={18} /> Exportar JSON</button>
-          <button class="btn ghost" onClick={() => fileRef.current.click()}><Icon name="down" size={18} /> Importar JSON</button>
+          <button class="btn ghost" onClick={() => set({ sheet: { type: 'export' } })}><Icon name="up" size={18} /> Exportar</button>
+          <button class="btn ghost" onClick={() => fileRef.current.click()}><Icon name="down" size={18} /> Importar</button>
         </div>
         <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={onFile} />
         <button class="btn ghost wide" onClick={() => set({ sheet: { type: 'reset' } })}><Icon name="reset" size={18} /> Reiniciar tiempo</button>
