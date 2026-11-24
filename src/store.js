@@ -8,10 +8,12 @@ import { fmtDur } from './time.js';
 import { catById, defaults, liveCats, migrateSettings } from './model.js';
 import { clearClassifiedCache } from './fin/classify.js';
 import { defaultFin, migrateFin } from './fin/model.js';
+import { BG_NAME, applyOrders, closeLane, orderTime, realEnd, resolveAction, trimOverdue } from './orders.js';
+import { genKeys, newCode, openOrders, sealOrder } from './inbox.js';
 
 export const now = () => Date.now();
 
-export const SETTING_KEYS = ['settingsVersion', 'cats', 'groups', 'warnPct', 'sound', 'forgetHours', 'minSeconds', 'theme', 'variant', 'privacy'];
+export const SETTING_KEYS = ['settingsVersion', 'cats', 'groups', 'warnPct', 'sound', 'forgetHours', 'bgMax', 'minSeconds', 'theme', 'variant', 'privacy'];
 export { defaults };
 
 let state = {
@@ -23,6 +25,10 @@ let state = {
   lock: null,          // configuración del bloqueo (ver lock.js); nunca va en los respaldos
   locked: false,       // ¿se está mostrando la pantalla de bloqueo? (con cifrado, los datos no están en memoria)
   sessions: [],
+  bg: [],              // IA en 2º plano: sesiones aparte {id, cat: 'bg', start, end}; no cuentan en topes
+  shortcut: null,      // atajo del Botón de Acción: { k: código, pub: clave pública del buzón | null }
+  inboxCount: 0,       // órdenes del atajo guardadas mientras PP está bloqueada
+  inboxNotes: [],      // órdenes recibidas en esta apertura, para confirmarlas en la pantalla de bloqueo
   fin: defaultFin(),   // Dinero: solo existe con el bloqueo activo (va dentro del cifrado)
   meta: { installedAt: Date.now(), lastBackupAt: null, backupSnoozedUntil: 0, installHintDismissed: false },
   tab: 'home',
@@ -40,6 +46,7 @@ let settingsTimer = null;
 let settingsDirty = false;
 let finDirty = false;
 let queue = Promise.resolve();
+let inboxPriv = null; // clave privada del buzón (solo en memoria y dentro del vault)
 
 export const getState = () => state;
 
@@ -64,8 +71,10 @@ function persist(fn) {
 /** Guarda sesiones y ajustes cifrados, tal como estén al momento de escribir. */
 async function writeVault() {
   if (!sealed() || !V.isOpen()) return;
-  await db.setKV('vault', await V.seal({ sessions: state.sessions, settings: pick(state), fin: state.fin }));
+  await db.setKV('vault', await V.seal(vaultData()));
 }
+
+const vaultData = () => ({ sessions: state.sessions, settings: pick(state), fin: state.fin, bg: state.bg, inboxKey: inboxPriv });
 
 function syncSessions(prev, next) {
   const before = new Map(prev.map((s) => [s.id, s]));
@@ -101,10 +110,11 @@ export function set(patch, opts) {
   const p = typeof patch === 'function' ? patch(prev) : patch;
   apply(p);
   if (!state.ready) return;
-  // Tema y estilo van también en claro: la pantalla de bloqueo los necesita antes de descifrar.
-  if (state.theme !== prev.theme || state.variant !== prev.variant) setMeta({ ui: { theme: state.theme, variant: state.variant } });
+  // Tema, estilo y modo de privacidad van también en claro: la pantalla de bloqueo los necesita antes de descifrar.
+  if (state.theme !== prev.theme || state.variant !== prev.variant || state.privacy !== prev.privacy) syncUi();
   if (sealed() && !V.isOpen()) return; // bloqueada: no hay nada que guardar
   if (state.sessions !== prev.sessions) syncSessions(prev.sessions, state.sessions);
+  if (state.bg !== prev.bg) { const bg = state.bg; persist(() => (sealed() ? writeVault() : db.setKV('bg', bg))); }
   const finChanged = state.fin !== prev.fin && sealed();
   const cur = JSON.stringify(pick(state));
   const settingsChanged = cur !== lastSettings;
@@ -140,6 +150,14 @@ export function setMeta(patch) {
   persist(() => db.setKV('meta', meta));
 }
 
+const syncUi = () => setMeta({ ui: { theme: state.theme, variant: state.variant, privacy: state.privacy } });
+
+/** Guarda el registro del atajo (código y clave pública del buzón). */
+function saveShortcut(rec) {
+  apply({ shortcut: rec });
+  return db.setKV('shortcut', rec);
+}
+
 /** Guarda la configuración del bloqueo; solo cambia el estado si se escribió en disco. */
 export function setLock(lock) {
   return serial(async () => {
@@ -152,15 +170,39 @@ export function setLock(lock) {
 export function enableVault(lock, master) {
   return serial(async () => {
     await V.open(master);
+    let shortcut;
     try {
-      const vault = await V.seal({ sessions: state.sessions, settings: pick(state), fin: state.fin });
-      await db.commit({ clearSessions: true, kv: { vault, settings: null, lock } });
+      const keys = await genKeys();
+      inboxPriv = keys.priv;
+      shortcut = { k: state.shortcut?.k || newCode(), pub: keys.pub };
+      const vault = await V.seal(vaultData());
+      await db.commit({ clearSessions: true, kv: { vault, settings: null, bg: null, inbox: null, lock, shortcut } });
     } catch (e) {
       V.close();
+      inboxPriv = null;
       throw e;
     }
-    apply({ lock });
-  }).then(() => setMeta({ ui: { theme: state.theme, variant: state.variant } }));
+    apply({ lock, shortcut });
+  }).then(syncUi);
+}
+
+/** Aplica las órdenes que el atajo dejó en el buzón mientras PP estaba bloqueada. Corre dentro de serial(). */
+async function drainInbox() {
+  const list = await db.getKV('inbox');
+  if (!Array.isArray(list) || !list.length) { apply({ inboxCount: 0, inboxNotes: [] }); return; }
+  const orders = inboxPriv ? await openOrders(inboxPriv, list) : [];
+  const r = applyOrders({ ...state }, orders, now(), newId);
+  apply({ sessions: r.sessions, bg: r.bg, inboxCount: 0, inboxNotes: [] });
+  await writeVault();
+  await db.commit({ kv: { inbox: null } });
+  orderToast(r, 'Del atajo: ');
+}
+
+/** Un solo mensaje con lo que hicieron las órdenes y, si hubo, lo que se recortó. */
+function orderToast(r, prefix = '') {
+  const parts = [...r.msgs];
+  if (r.cut.length) parts.push(cutText(r.cut));
+  if (parts.length) toast(prefix + parts.join(' · '), { kind: r.cut.length ? 'warn' : 'ok', long: true, sensitive: true });
 }
 
 /** Descifra los datos guardados con la clave maestra y muestra la app. */
@@ -181,10 +223,12 @@ export function openVault(master) {
     settingsDirty = false;
     finDirty = false;
     const settings = migrateSettings(data.settings);
+    inboxPriv = data.inboxKey || null;
     apply({
       ...freshDefaults(),
       ...(settings || {}),
       sessions: data.sessions || [],
+      bg: Array.isArray(data.bg) ? data.bg : [],
       fin: migrateFin(data.fin),
       locked: false,
       settingsAuth: false,
@@ -193,7 +237,18 @@ export function openVault(master) {
       toast: null,
     });
     lastSettings = JSON.stringify(pick(state));
-    if (settings !== data.settings) persist(writeVault);
+    let rewrite = settings !== data.settings;
+    // Datos de versiones anteriores: crea el código del atajo y las claves del buzón
+    if (!inboxPriv || !state.shortcut?.pub) {
+      const keys = await genKeys();
+      inboxPriv = keys.priv;
+      await db.setKV('vault', await V.seal(vaultData()));
+      await saveShortcut({ k: state.shortcut?.k || newCode(), pub: keys.pub });
+      rewrite = false;
+    }
+    if (rewrite) await writeVault();
+    if (state.meta.ui?.privacy !== state.privacy) syncUi();
+    await drainInbox();
   });
 }
 
@@ -211,12 +266,15 @@ export function lockApp() {
   }
   serial(() => {
     V.close();
+    inboxPriv = null;
     clearClassifiedCache();
     apply({
       ...freshDefaults(),
       theme: state.theme,
       variant: state.variant,
       sessions: [],
+      bg: [],
+      inboxNotes: [],
       fin: defaultFin(),
       dismissedForgot: null,
       finFilter: 'all',
@@ -234,10 +292,12 @@ export function disableVault() {
   settingsDirty = false;
   finDirty = false;
   return serial(async () => {
-    await db.commit({ clearSessions: true, putSessions: state.sessions, kv: { settings: pick(state), vault: null, lock: null } });
+    const shortcut = { k: state.shortcut?.k || newCode(), pub: null };
+    await db.commit({ clearSessions: true, putSessions: state.sessions, kv: { settings: pick(state), bg: state.bg, vault: null, lock: null, inbox: null, shortcut } });
     V.close();
+    inboxPriv = null;
     clearClassifiedCache();
-    apply({ lock: null, locked: false, fin: defaultFin(), settingsAuth: false, finCfgAuth: false });
+    apply({ lock: null, locked: false, fin: defaultFin(), settingsAuth: false, finCfgAuth: false, shortcut, inboxCount: 0 });
   });
 }
 
@@ -249,10 +309,12 @@ export function wipeData() {
   finDirty = false;
   return serial(async () => {
     const settings = sealed() ? { ...freshDefaults(), theme: state.theme, variant: state.variant } : pick(state);
-    await db.commit({ clearSessions: true, kv: { settings, vault: null, lock: null } });
+    const shortcut = { k: state.shortcut?.k || newCode(), pub: null };
+    await db.commit({ clearSessions: true, kv: { settings, vault: null, lock: null, bg: null, inbox: null, shortcut } });
     V.close();
+    inboxPriv = null;
     clearClassifiedCache();
-    apply({ ...settings, sessions: [], fin: defaultFin(), lock: null, locked: false, sheet: null, dismissedForgot: null, settingsAuth: false, finCfgAuth: false });
+    apply({ ...settings, sessions: [], bg: [], fin: defaultFin(), lock: null, locked: false, sheet: null, dismissedForgot: null, settingsAuth: false, finCfgAuth: false, shortcut, inboxCount: 0, inboxNotes: [] });
     lastSettings = JSON.stringify(pick(state));
   });
 }
@@ -261,7 +323,13 @@ export function wipeData() {
 export async function init() {
   try {
     const { sessions, settings, meta, lock } = await db.loadAll();
+    const [bg, sc, inbox] = await Promise.all([db.getKV('bg'), db.getKV('shortcut'), db.getKV('inbox')]);
     const m = { ...state.meta, ...(meta || {}) };
+    let shortcut = sc && typeof sc.k === 'string' ? sc : null;
+    if (!shortcut) {
+      shortcut = { k: newCode(), pub: null };
+      persist(() => db.setKV('shortcut', shortcut));
+    }
     if (lock?.v === 2) {
       // Cifrado: no hay nada que leer hasta que se desbloquee.
       const ui = m.ui || {};
@@ -269,12 +337,13 @@ export async function init() {
         ...freshDefaults(),
         theme: THEMES.includes(ui.theme) ? ui.theme : defaults.theme,
         variant: VARIANTS.includes(ui.variant) ? ui.variant : defaults.variant,
-        sessions: [], meta: m, lock, locked: true, ready: true,
+        sessions: [], bg: [], meta: m, lock, locked: true, ready: true, shortcut,
+        inboxCount: Array.isArray(inbox) ? inbox.length : 0,
       });
       return;
     }
     const loaded = migrateSettings(settings); // ajustes de versiones anteriores
-    apply({ ...defaults, ...(loaded || {}), sessions, meta: m, lock, locked: !!lock, ready: true });
+    apply({ ...defaults, ...(loaded || {}), sessions, bg: Array.isArray(bg) ? bg : [], meta: m, lock, locked: !!lock, ready: true, shortcut });
     lastSettings = JSON.stringify(pick(state));
     if (loaded !== settings) persist(() => db.setKV('settings', pick(state)));
     if (!meta) setMeta({});
@@ -354,6 +423,99 @@ export function toggleCat(catId) {
   set({ sessions: [...list, { id: newId(), cat: catId, start: t, end: null, note: '' }], dismissedForgot: null });
   if (state.sound) beep('start');
   if (closed) toast(`Guardado · ${catOf(closed.cat).short} · ${fmtDur(closed.end - closed.start)}`, { kind: 'ok', sensitive: true });
+}
+
+// ---------- IA en 2º plano, atajo del Botón de Acción y recorte ----------
+
+/** Inicia o para la IA en 2º plano (pista aparte: no cierra ni la cierra la categoría en curso). */
+export function toggleBg() {
+  const t = now();
+  if (state.bg.some((x) => x.end == null)) {
+    const r = closeLane(state.bg, t, state.minSeconds * 1000);
+    set({ bg: r.list });
+    if (state.sound) beep('stop');
+    toast(r.closed ? `Guardado · ${BG_NAME} · ${fmtDur(r.closed.end - r.closed.start)}` : 'Sesión muy corta, descartada', { kind: r.closed ? 'ok' : 'info', sensitive: !!r.closed });
+    return;
+  }
+  set({ bg: [...state.bg, { id: newId(), cat: 'bg', start: t, end: null }] });
+  if (state.sound) beep('start');
+  toast(`${BG_NAME} en marcha`, { kind: 'ok' });
+}
+
+function cutText(cut) {
+  const names = cut.map((s) => (s.cat === 'bg' ? BG_NAME : catOf(s.cat).short)).join(' y ');
+  return `Recorté ${names} a su máximo por sesión. Revísalo en Inicio.`;
+}
+
+const cutToast = (cut) => toast(cutText(cut), { kind: 'warn', long: true, sensitive: true });
+
+/** Recorta lo que pasó su máximo por sesión. Se llama cada segundo con la app abierta. */
+export function checkOverdue() {
+  if (!state.ready || state.locked) return;
+  const r = trimOverdue(state, now());
+  if (!r.cut.length) return;
+  set({ sessions: r.sessions, bg: r.bg });
+  cutToast(r.cut);
+}
+
+/** Revisión de una sesión recortada. how: 'keep' (deja el recorte) | 'real' (duró hasta ahora o hasta la siguiente). */
+export function resolveCut(lane, id, how) {
+  const list = state[lane];
+  const s = list.find((x) => x.id === id);
+  if (!s) return;
+  const { cut, ...rest } = s;
+  const end = how === 'real' ? realEnd(list, s, now()) : s.end;
+  set({ [lane]: list.map((x) => (x.id === id ? { ...rest, end } : x)) });
+  toast(`Guardado · ${s.cat === 'bg' ? BG_NAME : catOf(s.cat).short} · ${fmtDur(end - s.start)}`, { kind: 'ok', sensitive: true });
+}
+
+/** Aviso sobre una orden del atajo: en la pantalla de bloqueo si está bloqueada, si no como mensaje. */
+function orderNote(n) {
+  if (state.locked) apply({ inboxNotes: [...state.inboxNotes, n] });
+  else toast(n.error, { kind: 'warn', long: true });
+}
+
+/**
+ * Recibe una orden del atajo ({a, k, t} de parseOrder). Con los datos a mano la aplica ya;
+ * con PP bloqueada (datos cifrados) la guarda cifrada en el buzón hasta el próximo desbloqueo.
+ */
+export function receiveOrder(raw, receivedAt = now()) {
+  const sc = state.shortcut;
+  if (!sc || raw.k !== sc.k) {
+    orderNote({ label: raw.a, t: receivedAt, error: 'El atajo tiene un código antiguo o incorrecto. En PP, ve a Ajustes → Atajo del Botón de Acción y copia otra vez el enlace.' });
+    return Promise.resolve();
+  }
+  const t = orderTime(raw.t, receivedAt);
+  if (!sealed() || V.isOpen()) {
+    if (!state.ready) return Promise.resolve();
+    if (!resolveAction(raw.a, state.cats)) {
+      orderNote({ label: raw.a, t, error: `No reconozco «${raw.a}». Copia otra vez la lista del menú en tu atajo (Ajustes → Atajo del Botón de Acción).` });
+      return Promise.resolve();
+    }
+    const r = applyOrders({ ...state }, [{ a: raw.a, t }], now(), newId);
+    set({ sessions: r.sessions, bg: r.bg, dismissedForgot: null }, { immediate: true });
+    if (state.sound) beep('start');
+    orderToast(r);
+    return Promise.resolve();
+  }
+  if (!sc.pub) {
+    orderNote({ label: raw.a, t, error: 'Entra a PP una vez para activar el atajo y vuelve a intentarlo.' });
+    return Promise.resolve();
+  }
+  return serial(async () => {
+    const ct = await sealOrder(sc.pub, { a: raw.a, t });
+    const list = await db.getKV('inbox');
+    const next = [...(Array.isArray(list) ? list : []), ct].slice(-200);
+    await db.setKV('inbox', next);
+    apply({ inboxCount: next.length, inboxNotes: [...state.inboxNotes, { label: raw.a, t }] });
+  }).catch(() => orderNote({ label: raw.a, t, error: 'No se pudo guardar la orden. Inténtalo de nuevo.' }));
+}
+
+/** Cambia el código secreto del atajo (el enlace anterior deja de funcionar). */
+export function newShortcutCode() {
+  const rec = { ...(state.shortcut || { pub: null }), k: newCode() };
+  apply({ shortcut: rec });
+  persist(() => db.setKV('shortcut', rec));
 }
 
 export function saveSession(s) {
@@ -445,7 +607,7 @@ export function updateCategory(id, patch) {
 export function addCategory() {
   const used = new Set(liveCats(state).map((c) => c.color));
   const color = [1, 2, 3, 4, 5, 6].find((n) => !used.has(n)) || 1;
-  const c = { id: 'c' + newId(), name: 'Nueva categoría', short: 'Nueva', color, icon: 'star', cap: null, archived: false };
+  const c = { id: 'c' + newId(), name: 'Nueva categoría', short: 'Nueva', color, icon: 'star', cap: null, max: null, archived: false };
   set({ cats: [...state.cats, c] });
   return c.id;
 }

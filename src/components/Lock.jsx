@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import { Icon } from './Icon.jsx';
 import { hasFinData } from '../fin/model.js';
 import { set, toast, useNow, useStore, getState } from '../store.js';
+import { fmtTime } from '../time.js';
 import {
   MIN_LENGTH, NoPrfError, checkPassword, confirmBiometric, enrollBiometric, hasBiometric, isLegacy,
   removeLock, savePassword, unlockWithBiometric, unlockWithPassword, wipeAndUnlock,
@@ -102,11 +103,30 @@ export function LockScreen() {
     );
   }
 
+  // Con un modo de ocultar activo (o desconocido) no se muestra qué categoría se eligió
+  const showLabels = st.meta.ui?.privacy === 'off';
+  const notes = st.inboxNotes || [];
+  const saved = notes.filter((n) => !n.error);
+  const errors = notes.filter((n) => n.error);
+
   return (
     <div class="lock">
+      {notes.length > 0 && (
+        <div class="lock-orders" role="status">
+          {saved.length > 0 && (
+            <div class="order-ok">
+              <b><Icon name="check" size={18} /> {saved.length === 1 ? 'Orden guardada' : `${saved.length} órdenes guardadas`}</b>
+              <ul>{saved.map((n, i) => <li key={i}>{showLabels ? `${n.label} · ` : ''}{fmtTime(n.t)}</li>)}</ul>
+              <span>Se aplicarán con esa hora cuando entres a PP. Ya puedes bloquear el iPhone.</span>
+            </div>
+          )}
+          {errors.map((n, i) => <p class="msg warn" key={i}>{n.error}</p>)}
+        </div>
+      )}
       <div class="lock-box">
         <div class="brand">PP</div>
         <h1>Entrar a PP</h1>
+        {!saved.length && st.inboxCount > 0 && <p class="msg info">Tienes {st.inboxCount === 1 ? '1 orden' : `${st.inboxCount} órdenes`} del atajo por aplicar.</p>}
         {legacy && <p class="msg info">Actualización de seguridad: entra una vez con tu contraseña para cifrar tus datos.</p>}
         {hasBio && <button class="btn primary" onClick={bio}><Icon name="face" size={20} /> Entrar con Face ID</button>}
         <form onSubmit={submit}>

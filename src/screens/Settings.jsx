@@ -4,7 +4,8 @@ import { PrivacyChoice } from '../components/Privacy.jsx';
 import { Row, Stepper, Toggle } from '../components/Controls.jsx';
 import { catById } from '../model.js';
 import { fmtDM, fmtDur } from '../time.js';
-import { addCategory, addGroup, resetSettings, set, setArchived, toast, updateCategory, updateGroup, useStore } from '../store.js';
+import { addCategory, addGroup, newShortcutCode, resetSettings, set, setArchived, toast, updateCategory, updateGroup, useStore } from '../store.js';
+import { BG_NAME, menuLines } from '../orders.js';
 import { parseBackup } from '../backup.js';
 import { checkUpdate, isStandalone } from '../pwa.js';
 import { NeedSecondTapError, biometricAvailable, enrollBiometric, finishBiometricEnrollment, hasBiometric, pauseAutoLock, removeBiometric, resumeAutoLock, setGrace } from '../lock.js';
@@ -63,6 +64,16 @@ export function Settings() {
   };
 
   const last = st.meta.lastBackupAt;
+  const base = location.pathname.replace(/[^/]*$/, '');
+  const link = st.shortcut ? `webapp://${location.host}${base}?k=${st.shortcut.k}&a=` : '';
+  const copy = async (text, what) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(`${what} copiado`, { kind: 'ok' });
+    } catch {
+      toast('No se pudo copiar. Mantén pulsado el texto para copiarlo a mano.', { kind: 'warn', long: true });
+    }
+  };
   return (
     <div class="screen">
       <header class="top"><div><div class="eyebrow">Ajustes</div><h1>Configuración</h1></div></header>
@@ -135,6 +146,27 @@ export function Settings() {
         <Row label="Sonido sutil" hint="Al iniciar, finalizar y avisos de tope">
           <Toggle on={st.sound} onChange={(v) => set({ sound: v })} />
         </Row>
+      </section>
+
+      <h3 class="sec">Atajo del Botón de Acción</h3>
+      <section class="panel">
+        <p class="fine first">Máximo por sesión: si una sesión lo pasa sin que la pares, PP la recorta a ese máximo y te pide revisarla en Inicio. 0 h = sin máximo.</p>
+        {live.map((c) => (
+          <Row key={c.id} label={<><i class="dot" style={{ background: `var(--p${c.color})` }} /> {c.short}</>}>
+            <Stepper value={c.max || 0} step={0.5} min={0} max={24} unit="h" onChange={(v) => updateCategory(c.id, { max: v > 0 ? v : null })} />
+          </Row>
+        ))}
+        <Row label={BG_NAME} hint="Pista aparte: no cuenta en topes">
+          <Stepper value={st.bgMax || 0} step={0.5} min={0} max={24} unit="h" onChange={(v) => set({ bgMax: v })} />
+        </Row>
+        <p class="fine">Para tu atajo de iOS copia estos dos textos. Si cambias categorías, vuelve a copiar la lista.</p>
+        <div class="btn-grid">
+          <button class="btn ghost" onClick={() => copy(menuLines(st.cats).join('\n'), 'Lista del menú')}>Copiar lista</button>
+          <button class="btn ghost" onClick={() => copy(link, 'Enlace')} disabled={!link}>Copiar enlace</button>
+        </div>
+        <p class="shortcut-link" aria-label="Enlace del atajo">{link}</p>
+        <button class="btn ghost wide" onClick={() => { newShortcutCode(); toast('Código cambiado: copia otra vez el enlace en tu atajo', { kind: 'warn', long: true }); }}><Icon name="reset" size={18} /> Cambiar código del atajo</button>
+        <p class="fine">El código evita que una página web le mande órdenes a PP. Con PP bloqueada, las órdenes se guardan cifradas y se aplican al entrar.</p>
       </section>
 
       <h3 class="sec">Privacidad en pantalla</h3>

@@ -1,22 +1,24 @@
 // Modelo de categorías y topes (ajustes versión 2).
 //   cats:   [{ id, name, short, color, icon, cap, archived }]  (el orden del array es el de la app)
 //           cap = tope propio en horas por semana, o null.
+//           max = duración máxima de una sesión en horas (recorte automático), o null.
 //   groups: [{ id, name, hours, cats: [ids] }]  topes compartidos; una categoría puede estar en varios.
 
-export const SETTINGS_VERSION = 2;
+export const SETTINGS_VERSION = 3; // 3: máximo por sesión e IA en 2º plano
 
 export const ICONS = ['ia', 'sin', 'chat', 'game', 'tv', 'proy', 'book', 'code', 'music', 'heart', 'star'];
 const DEFAULT_ICON = { ia: 'ia', sin: 'sin', proy: 'proy', iarec: 'chat', juegos: 'game', series: 'tv' };
+const DEFAULT_MAX = { ia: 2, sin: 1, iarec: 2, juegos: 3, series: 3, proy: 4 };
 
 export const defaults = {
   settingsVersion: SETTINGS_VERSION,
   cats: [
-    { id: 'ia', name: 'Ensoñaciones con IA', short: 'Con IA', color: 1, icon: 'ia', cap: null, archived: false },
-    { id: 'sin', name: 'Ensoñaciones sin IA', short: 'Sin IA', color: 2, icon: 'sin', cap: null, archived: false },
-    { id: 'iarec', name: 'Uso recreativo de IA', short: 'IA recreativa', color: 5, icon: 'chat', cap: 15, archived: false },
-    { id: 'juegos', name: 'Videojuegos', short: 'Videojuegos', color: 4, icon: 'game', cap: 21, archived: false },
-    { id: 'series', name: 'Series', short: 'Series', color: 6, icon: 'tv', cap: 21, archived: false },
-    { id: 'proy', name: 'Proyectos', short: 'Proyectos', color: 3, icon: 'proy', cap: 10, archived: false },
+    { id: 'ia', name: 'Ensoñaciones con IA', short: 'Con IA', color: 1, icon: 'ia', cap: null, max: 2, archived: false },
+    { id: 'sin', name: 'Ensoñaciones sin IA', short: 'Sin IA', color: 2, icon: 'sin', cap: null, max: 1, archived: false },
+    { id: 'iarec', name: 'Uso recreativo de IA', short: 'IA recreativa', color: 5, icon: 'chat', cap: 15, max: 2, archived: false },
+    { id: 'juegos', name: 'Videojuegos', short: 'Videojuegos', color: 4, icon: 'game', cap: 21, max: 3, archived: false },
+    { id: 'series', name: 'Series', short: 'Series', color: 6, icon: 'tv', cap: 21, max: 3, archived: false },
+    { id: 'proy', name: 'Proyectos', short: 'Proyectos', color: 3, icon: 'proy', cap: 10, max: 4, archived: false },
   ],
   groups: [
     { id: 'sonar', name: 'Ensoñaciones', hours: 20, cats: ['ia', 'sin'] },
@@ -26,6 +28,7 @@ export const defaults = {
   warnPct: 80,
   sound: true,
   forgetHours: 8,
+  bgMax: 4,           // máximo de una sesión de IA en 2º plano (horas)
   minSeconds: 5,
   theme: 'dark',
   variant: 'aurora',
@@ -35,12 +38,26 @@ export const defaults = {
 const ORDER = defaults.cats.map((c) => c.id);
 
 /**
- * Convierte ajustes de la versión 1 (cada categoría en un solo grupo) a la 2.
- * Conserva nombres, colores y horas del usuario. Un grupo de una sola categoría
- * pasa a ser su tope propio, y se añaden las categorías y topes nuevos.
+ * Convierte ajustes de versiones anteriores a la actual.
+ * v1 → v2: cada categoría estaba en un solo grupo. Conserva nombres, colores y horas del usuario;
+ *          un grupo de una sola categoría pasa a ser su tope propio, y se añaden categorías y topes nuevos.
+ * v2 → v3: máximo por sesión (recorte automático) e IA en 2º plano.
  */
 export function migrateSettings(s) {
   if (!s || s.settingsVersion >= SETTINGS_VERSION) return s;
+  let out = s.settingsVersion >= 2 ? s : v1to2(s);
+  if (!(out.settingsVersion >= 3)) {
+    out = {
+      ...out,
+      settingsVersion: 3,
+      cats: (Array.isArray(out.cats) ? out.cats : []).map((c) => ('max' in c ? c : { ...c, max: DEFAULT_MAX[c.id] ?? null })),
+      bgMax: out.bgMax ?? defaults.bgMax,
+    };
+  }
+  return out;
+}
+
+function v1to2(s) {
   const oldCats = Array.isArray(s.cats) ? s.cats : [];
   let cats = oldCats.map((c) => ({
     id: c.id, name: c.name, short: c.short || c.name, color: c.color,
@@ -58,7 +75,7 @@ export function migrateSettings(s) {
   }
   const rank = (id) => (ORDER.includes(id) ? ORDER.indexOf(id) : ORDER.length);
   cats.sort((a, b) => rank(a.id) - rank(b.id));
-  return { ...s, settingsVersion: SETTINGS_VERSION, cats, groups };
+  return { ...s, settingsVersion: 2, cats, groups };
 }
 
 /** Categoría por id; si ya no existe, un sustituto para no romper el historial. */

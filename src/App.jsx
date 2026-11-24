@@ -8,7 +8,7 @@ import { Log } from './screens/Log.jsx';
 import { Stats } from './screens/Stats.jsx';
 import { Settings } from './screens/Settings.jsx';
 import { DAY, HOUR, fmtDur, rangeTotals, startOfWeek } from './time.js';
-import { activeSession, getState, now, set, toast, useStore } from './store.js';
+import { activeSession, checkOverdue, getState, now, set, toast, useStore } from './store.js';
 import { beep } from './audio.js';
 import { sum } from './stats.js';
 import { allCaps } from './model.js';
@@ -86,6 +86,13 @@ function Toast({ t }) {
 export function App() {
   const st = useStore();
   useCapAlerts();
+
+  // Recorte automático: una sesión que pasa su máximo se cierra en ese máximo (para revisarla)
+  useEffect(() => {
+    checkOverdue();
+    const id = setInterval(checkOverdue, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Aplica variante y tema (con modo auto) al <html>
   useEffect(() => {

@@ -17,6 +17,7 @@ export function buildBackup() {
     exportedAt: Date.now(),
     settings: Object.fromEntries(SETTING_KEYS.map((k) => [k, s[k]])),
     sessions: s.sessions,
+    ...(s.bg?.length ? { bg: s.bg } : {}),
     ...(hasFinData(s.fin) ? { fin: s.fin } : {}),
   };
 }
@@ -82,7 +83,9 @@ function validSettings(raw) {
   if ('forgetHours' in out && (!isNum(out.forgetHours) || out.forgetHours < 1 || out.forgetHours > 24)) delete out.forgetHours;
   if ('minSeconds' in out && (!isNum(out.minSeconds) || out.minSeconds < 0 || out.minSeconds > 120)) delete out.minSeconds;
   if ('sound' in out && typeof out.sound !== 'boolean') delete out.sound;
-  out.cats = s.cats.map((c) => ({ ...c, short: c.short || c.name, icon: c.icon || 'star', cap: c.cap ?? null, archived: !!c.archived }));
+  if ('bgMax' in out && (!isNum(out.bgMax) || out.bgMax < 0 || out.bgMax > 24)) delete out.bgMax;
+  const okMax = (m) => isNum(m) && m > 0 && m <= 24;
+  out.cats = s.cats.map((c) => ({ ...c, short: c.short || c.name, icon: c.icon || 'star', cap: c.cap ?? null, max: okMax(c.max) ? c.max : null, archived: !!c.archived }));
   if (!out.cats.some((c) => !c.archived)) out.cats[0] = { ...out.cats[0], archived: false };
   return out;
 }
@@ -150,17 +153,26 @@ export function parseBackup(text) {
     seen.add(id);
     sessions.push({ id, cat: r.cat, start: r.start, end, note: typeof r.note === 'string' ? r.note.slice(0, 80) : '' });
   }
-  return { sessions, settings, fin: validFin(data.fin), exportedAt, skipped };
+  const bg = [];
+  for (const r of Array.isArray(data.bg) ? data.bg : []) {
+    const end = r?.end == null ? exportedAt : r.end;
+    if (!r || !isNum(r.start) || !isNum(end) || end <= r.start) continue;
+    const id = typeof r.id === 'string' && r.id && !seen.has(r.id) ? r.id : newId();
+    seen.add(id);
+    bg.push({ id, cat: 'bg', start: r.start, end });
+  }
+  return { sessions, bg, settings, fin: validFin(data.fin), exportedAt, skipped };
 }
 
 /** mode: 'merge' agrega lo que falta; 'replace' sustituye todo. Deja copia para deshacer. */
 export function applyImport(parsed, mode) {
   const before = getState();
-  const snapshot = { sessions: before.sessions, fin: before.fin, ...Object.fromEntries(SETTING_KEYS.map((k) => [k, before[k]])) };
+  const snapshot = { sessions: before.sessions, bg: before.bg, fin: before.fin, ...Object.fromEntries(SETTING_KEYS.map((k) => [k, before[k]])) };
+  const pbg = parsed.bg || [];
   // Dinero solo se guarda cifrado: sin bloqueo activo no se importa
   const finOk = !!parsed.fin && before.lock?.v === 2;
   if (mode === 'replace') {
-    set({ ...(parsed.settings || {}), sessions: parsed.sessions, ...(finOk ? { fin: parsed.fin } : {}) }, { immediate: true });
+    set({ ...(parsed.settings || {}), sessions: parsed.sessions, bg: pbg, ...(finOk ? { fin: parsed.fin } : {}) }, { immediate: true });
     toast(`Respaldo restaurado · ${parsed.sessions.length} sesiones`, { kind: 'ok', action: { label: 'Deshacer', fn: () => set(snapshot, { immediate: true }) } });
     return;
   }
@@ -194,7 +206,13 @@ export function applyImport(parsed, mode) {
   const usedMissing = new Set(extra.map((s) => s.cat).filter((id) => !haveSessCats.has(id)));
   const extraCats = (parsed.settings?.cats || []).filter((c) => usedMissing.has(c.id));
   const sessions = [...before.sessions, ...extra].sort((a, b) => a.start - b.start);
+  const bgStarts = new Set(before.bg.map((s) => s.start));
+  const bgIds = new Set(before.bg.map((s) => s.id));
+  const extraBg = pbg.filter((s) => !bgStarts.has(s.start)).map((s) => (bgIds.has(s.id) ? { ...s, id: newId() } : s));
+  // Una sesión en curso de IA en 2º plano sigue siendo la única abierta
+  const bg = extraBg.length ? [...before.bg, ...extraBg].sort((a, b) => a.start - b.start) : before.bg;
   set({
+    ...(extraBg.length ? { bg } : {}),
     ...(extraCats.length ? { cats: [...before.cats, ...extraCats] } : {}),
     ...(finMerge ? { fin: finMerge } : {}),
     sessions,

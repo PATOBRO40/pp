@@ -297,6 +297,58 @@ async function run() {
     await page.getByRole('button', { name: 'Inicio', exact: true }).click();
     await page.waitForSelector('.cards');
 
+    // Atajo del Botón de Acción: órdenes por enlace con PP bloqueada (buzón cifrado) y al desbloquear
+    const kv = (key) => page.evaluate((k) => new Promise((res, rej) => {
+      const req = indexedDB.open('pp', 1);
+      req.onsuccess = () => { const g = req.result.transaction('kv').objectStore('kv').get(k); g.onsuccess = () => res(g.result); g.onerror = () => rej(g.error); };
+      req.onerror = () => rej(req.error);
+    }), key);
+    const sc = await kv('shortcut');
+    assert.ok(sc?.k && sc.pub, 'Falta el código o la clave pública del atajo');
+    const orderUrl = (a, k = sc.k) => `${URL}?k=${encodeURIComponent(k)}&a=${encodeURIComponent(a)}&t=${encodeURIComponent(new Date().toISOString())}`;
+    await page.goto(orderUrl('Lectura'));
+    await page.waitForSelector('.order-ok');
+    assert.equal(await page.evaluate(() => location.search), '', 'La orden debe quitarse de la dirección');
+    const okTxt = await page.locator('.order-ok').textContent();
+    assert.match(okTxt, /Orden guardada/);
+    assert.ok(!okTxt.includes('Lectura'), 'Con «Ocultar todo» no debe mostrarse la categoría elegida');
+    let inbox = await kv('inbox');
+    assert.equal(inbox.length, 1);
+    assert.ok(!JSON.stringify(inbox).includes('Lectura'), 'La orden debe guardarse cifrada');
+    await page.goto(orderUrl('▶ IA en 2º plano'));
+    await page.waitForSelector('.lock-box');
+    assert.equal((await kv('inbox')).length, 2);
+    await page.goto(orderUrl('Lectura', 'codigo-falso'));
+    await page.waitForSelector('.lock-orders .msg.warn');
+    assert.equal((await kv('inbox')).length, 2, 'Una orden con código falso no se guarda');
+    await checkNoOverflow(page, 'Bloqueo con orden');
+    await shot(page, '06-shortcut-locked.png');
+    await page.locator('.lock-box input[type="password"]').fill('1234');
+    await page.getByRole('button', { name: 'Entrar' }).click();
+    await page.waitForSelector('.card.on');
+    const appliedToast = await page.locator('.toast').textContent();
+    assert.match(appliedToast, /Iniciaste Lectura/);
+    assert.match(appliedToast, /IA en 2º plano en marcha/);
+    assert.match(await page.locator('.card.on .name').textContent(), /Lectura/);
+    await page.waitForSelector('.bg-lane.on');
+    inbox = await kv('inbox');
+    assert.ok(!inbox || inbox.length === 0, 'El buzón debe vaciarse al aplicar las órdenes');
+    await checkNoOverflow(page, 'Inicio con IA en 2º plano');
+    await shot(page, '07-shortcut-applied.png');
+    // Parar IA en 2º plano desde la app y ver la sección del atajo en Ajustes
+    await page.locator('.bg-lane.on').click();
+    await page.waitForSelector('.bg-lane:not(.on)');
+    await page.getByRole('button', { name: 'Ajustes', exact: true }).click();
+    await page.locator('.auth-gate input[type="password"]').fill('1234');
+    await page.getByRole('button', { name: 'Entrar' }).click();
+    await page.waitForSelector('.shortcut-link');
+    assert.equal(await page.locator('.shortcut-link').textContent(), `webapp://localhost:${PORT}/?k=${sc.k}&a=`);
+    await checkNoOverflow(page, 'Ajustes con atajo');
+    await page.locator('.shortcut-link').scrollIntoViewIfNeeded();
+    await shot(page, '08-shortcut-settings.png');
+    await page.getByRole('button', { name: 'Inicio', exact: true }).click();
+    await page.waitForSelector('.cards');
+
     // Caso final de límite de intentos (5 fallos -> espera 30 s) y Face ID fallido al final
     await page.getByRole('button', { name: 'Ajustes', exact: true }).click();
     await page.locator('.auth-gate input[type="password"]').fill('1234');

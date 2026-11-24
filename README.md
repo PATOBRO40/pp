@@ -28,6 +28,8 @@ El service worker solo se registra en la versión compilada. Por `http://IP-loca
 | `src/store.js` | Estado global; guarda solo los cambios en IndexedDB |
 | `src/backup.js` | Exportar e importar JSON |
 | `src/lock.js` | Bloqueo de entrada: contraseña, Face ID y pantalla de privacidad |
+| `src/orders.js` | Órdenes del atajo del Botón de Acción, IA en 2º plano y recorte al máximo por sesión (lógica pura) |
+| `src/inbox.js` | Buzón cifrado (RSA-OAEP) de órdenes recibidas con PP bloqueada |
 | `src/vault.js` | Cifrado AES-GCM de sesiones, ajustes y Dinero; respaldos cifrados |
 | `src/fin/` | Dinero: lectura de extractos (`statements.js`, `pdf.js`), clasificación (`classify.js`), cálculos (`stats.js`) |
 | `src/pwa.js` | Registro del service worker y actualizaciones |
@@ -41,6 +43,19 @@ Cada sesión guarda `start` y `end` en milisegundos (`end: null` si está activa
 
 Una sesión que cruza la medianoche es un solo registro. Se reparte entre días y semanas al calcular, nunca al guardar.
 
+**Máximo por sesión (recorte automático).** Cada categoría puede tener un máximo en horas (`max`; `null` = sin máximo). Si una sesión lo pasa sin que se pare, PP la cierra en inicio + máximo, la marca con `cut` y en Inicio pide revisarla: dejar el recorte, «era real» (hasta ahora o hasta la siguiente sesión) o elegir la hora de fin. Por defecto: Con IA 2 h, Sin IA 1 h, IA recreativa 2 h, Videojuegos 3 h, Series 3 h, Proyectos 4 h.
+
+**IA en 2º plano.** Pista aparte (`bg`, sesiones `{id, cat: 'bg', start, end}`) para el tiempo en que la IA trabaja mientras haces otra cosa. Corre junto a cualquier categoría, cambiar de categoría no la cierra y **no cuenta en topes**; en Inicio se ve su tiempo de hoy y de la semana. Su máximo por sesión es `bgMax` (4 h por defecto).
+
+## Atajo del Botón de Acción
+
+Un atajo de iOS abre `webapp://<host>/pp/?k=<código>&a=<opción>` (con `webapp://` iOS abre la app instalada y no Safari). Opciones: `⏹ Parar`, el nombre de una categoría, `▶ IA en 2º plano` y `⏹ IA en 2º plano`; `t=<hora ISO>` es opcional. La lista del menú y el enlace se copian desde **Ajustes → Atajo del Botón de Acción**.
+
+- Elegir otra categoría para la actual y empieza la nueva en el mismo instante; elegir la que ya está activa no hace nada.
+- `k` es un código secreto (kv `shortcut`) para que una página web no pueda mandar órdenes. Se puede cambiar.
+- PP lee la orden al arrancar y la quita de la dirección para que recargar no la repita.
+- **Con PP bloqueada** la orden se cifra con una clave pública RSA-OAEP y se guarda en kv `inbox`; la clave privada vive dentro de `vault`. Al entrar se aplican todas con su hora (recortando antes lo que hubiera pasado su máximo) y se borran. La pantalla de bloqueo confirma la orden; con un modo de ocultar activo no muestra la categoría.
+
 ## Categorías y topes
 
 Cada categoría puede tener un **tope propio** (horas por semana) y estar en varios **topes compartidos**, que suman el tiempo de sus categorías. Por defecto:
@@ -53,20 +68,20 @@ Cada categoría puede tener un **tope propio** (horas por semana) y estar en var
 
 Proyectos tiene un tope propio de 10 h. Todo se edita en Ajustes; archivar oculta una categoría y conserva su historial, y eliminarla borra también sus sesiones.
 
-Los ajustes de la versión anterior se migran solos (`migrateSettings`): un grupo con una sola categoría pasa a ser su tope propio.
+Los ajustes de versiones anteriores se migran solos (`migrateSettings`): en la v2 un grupo con una sola categoría pasa a ser su tope propio, y en la v3 se añaden el máximo por sesión y `bgMax`.
 
 ## Respaldo
 
 Los datos viven solo en el almacenamiento de la app instalada, que es independiente del de Safari. Si se borra la app, se borran los datos. Exporta desde **Ajustes → Datos y respaldo**; la app lo recuerda cada 7 días.
 
-Formato: `{ app: "PP", schema: 3, exportedAt, settings, sessions, fin? }`. Si cambia la estructura, sube `schema` y añade la migración en `parseBackup`. Los respaldos pueden exportarse cifrados con contraseña (recomendado, AES-GCM + PBKDF2) o en claro; al importar se validan estructura, rangos y valores permitidos, y en modo «Combinar» se conservan también las categorías faltantes referenciadas.
+Formato: `{ app: "PP", schema: 3, exportedAt, settings, sessions, bg?, fin? }`. Si cambia la estructura, sube `schema` y añade la migración en `parseBackup`. Los respaldos pueden exportarse cifrados con contraseña (recomendado, AES-GCM + PBKDF2) o en claro; al importar se validan estructura, rangos y valores permitidos, y en modo «Combinar» se conservan también las categorías faltantes referenciadas.
 
 ## Bloqueo y cifrado
 
 Opcional, en **Ajustes → Seguridad**. Al activarlo, sesiones, ajustes y Dinero se guardan **cifrados** (AES-GCM de 256 bits) en la clave `vault` de IndexedDB, y se borra la copia en claro.
 
 - Una clave maestra aleatoria cifra los datos. Se guarda envuelta con la contraseña (PBKDF2-SHA256, 310 000 iteraciones) y, si Face ID está activo, con el secreto de la extensión PRF de WebAuthn (requiere iOS 18 o posterior).
-- Al bloquear, la clave, los datos y la caché de clasificación se borran de la memoria. En claro solo quedan el tema y el estilo (`meta.ui`), para dibujar la pantalla de bloqueo.
+- Al bloquear, la clave, los datos y la caché de clasificación se borran de la memoria. En claro solo quedan el tema, el estilo y el modo de privacidad (`meta.ui`), para dibujar la pantalla de bloqueo, y el código y la clave pública del atajo (`shortcut`).
 - La configuración está en la clave `lock` y no entra en los respaldos.
 - El guardado pendiente se vuelca antes de pasar a segundo plano o actualizar, y el bloqueo inmediato «Al salir» pausa brevemente mientras están abiertos el selector de archivos o la hoja de compartir de iOS.
 - Sin servidor no hay recuperación: si se olvida la contraseña y no hay Face ID, entrar exige borrar sesiones y ajustes.

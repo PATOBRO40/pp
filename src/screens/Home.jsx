@@ -2,7 +2,8 @@ import { Icon } from '../components/Icon.jsx';
 import { PrivacyButton, openProtectedSheet } from '../components/Privacy.jsx';
 import { CapBar } from '../components/CapBar.jsx';
 import { DAY, fmtClock, fmtDM, fmtWeekday, fmtDur, fmtTime, rangeTotals, startOfDay, startOfWeek } from '../time.js';
-import { activeSession, set, setMeta, toggleCat, useNow, useStore } from '../store.js';
+import { activeSession, resolveCut, set, setMeta, toggleBg, toggleCat, useNow, useStore } from '../store.js';
+import { BG_NAME, realEnd } from '../orders.js';
 import { isStandalone } from '../pwa.js';
 import { sum } from '../stats.js';
 import { catById, catsWithData, liveCats, topLevelCaps } from '../model.js';
@@ -15,6 +16,10 @@ export function Home() {
   const ws = startOfWeek(t);
   const today = rangeTotals(st.sessions, ds, ds + DAY, t);
   const week = rangeTotals(st.sessions, ws, ws + 7 * DAY, t);
+  const bgAct = st.bg.find((x) => x.end == null);
+  const bgToday = rangeTotals(st.bg, ds, ds + DAY, t).bg || 0;
+  const bgWeek = rangeTotals(st.bg, ws, ws + 7 * DAY, t).bg || 0;
+  const cuts = [...st.sessions.filter((s) => s.cut).map((s) => ['sessions', s]), ...st.bg.filter((s) => s.cut).map((s) => ['bg', s])];
   const forgotten = act && t - act.start > st.forgetHours * 3600000 && st.dismissedForgot !== act.id;
   const actCat = act && catById(st, act.cat);
   const backupDue = st.sessions.length > 0 && t > (st.meta.lastBackupAt ?? st.meta.installedAt) + 7 * DAY && t > st.meta.backupSnoozedUntil;
@@ -81,6 +86,25 @@ export function Home() {
         </div>
       )}
 
+      {cuts.map(([lane, s]) => {
+        const name = lane === 'bg' ? BG_NAME : catById(st, s.cat).short;
+        const real = realEnd(st[lane], s, t);
+        return (
+          <div class="banner" key={s.id}>
+            <Icon name="clock" />
+            <div>
+              <b class="pv">Revisa: {name} se recortó a {fmtDur(s.end - s.start)}</b>
+              <span class="pv">Empezó a las {fmtTime(s.start)} y pasó su máximo por sesión sin que la pararas, así que PP la cerró a las {fmtTime(s.end)}.</span>
+              <div class="banner-actions">
+                <button onClick={() => resolveCut(lane, s.id, 'keep')}>Dejar {fmtDur(s.end - s.start)}</button>
+                {real > s.end + 60000 && <button class="pv" onClick={() => resolveCut(lane, s.id, 'real')}>Era real: hasta las {fmtTime(real)}</button>}
+                {lane === 'sessions' && <button class="quiet" onClick={() => { resolveCut(lane, s.id, 'keep'); openProtectedSheet({ type: 'edit', id: s.id }, 'Editar sesión'); }}>Elegir hora de fin</button>}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
       <section class="cards">
         {liveCats(st).map((c) => {
           const on = act?.cat === c.id;
@@ -99,6 +123,21 @@ export function Home() {
           );
         })}
       </section>
+
+      {bgAct ? (
+        <button class="bg-lane on" onClick={toggleBg} aria-label={`Parar ${BG_NAME}`}>
+          <i class="bg-dot" />
+          <span class="bg-name">IA trabajando en 2º plano<small>desde las <span class="pv">{fmtTime(bgAct.start)}</span> · no cuenta en topes</small></span>
+          <b class="pv">{fmtClock(t - bgAct.start)}</b>
+          <span class="pill"><Icon name="stop" size={13} /></span>
+        </button>
+      ) : (
+        <button class="bg-lane" onClick={toggleBg} aria-label={`Iniciar ${BG_NAME}`}>
+          <i class="bg-dot" />
+          <span class="bg-name">{BG_NAME}<small>Mientras la IA trabaja y tú haces otra cosa · no cuenta en topes</small></span>
+          <span class="pill"><Icon name="play" size={13} /></span>
+        </button>
+      )}
 
       <button class="btn ghost" onClick={() => openProtectedSheet({ type: 'reset' }, 'Reiniciar tiempo')}><Icon name="reset" size={18} /> Reiniciar tiempo</button>
 
@@ -137,6 +176,9 @@ export function Home() {
               <div class="row-stat" key={c.id}><i class="dot" style={{ background: `var(--p${c.color})` }} /><span>{c.short}</span><b>{fmtDur(totals[c.id] || 0)}</b></div>
             ))}
             <div class="row-stat total"><span>Total</span><b>{fmtDur(Object.values(totals).reduce((x, y) => x + y, 0))}</b></div>
+            {(label === 'Hoy' ? bgToday : bgWeek) > 0 && (
+              <div class="row-stat aside"><i class="dot bg" /><span>IA en 2º plano</span><b>{fmtDur(label === 'Hoy' ? bgToday : bgWeek)}</b></div>
+            )}
           </div>
         ))}
       </section>

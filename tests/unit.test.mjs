@@ -180,3 +180,140 @@ test('fin/stats.js y parsePesos: monthStart > 1, yieldBy === yield y formatos de
   const st2 = savingsStats(f, ['2026-01', '2026-02']);
   assert.equal(st2.yieldBy.reduce((a, [, v]) => a + v, 0), st2.yield);
 });
+
+import { BG_OFF, BG_ON, STOP, applyOrders, menuLines, orderTime, parseOrder, realEnd, resolveAction, trimOverdue } from '../src/orders.js';
+import { defaults, migrateSettings } from '../src/model.js';
+import { genKeys, openOrders, sealOrder } from '../src/inbox.js';
+
+const H = 3600000;
+const CATS = defaults.cats.map((c) => ({ ...c }));
+let seq = 0;
+const nid = () => `n${++seq}`;
+const base = (over = {}) => ({ sessions: [], bg: [], cats: CATS, bgMax: 4, minSeconds: 5, ...over });
+
+test('orders.js: lee la orden del enlace, la hora del toque y reconoce las opciones del menú', () => {
+  const o = parseOrder('?k=abc&a=%E2%8F%B9%EF%B8%8F%20Parar&t=2026-11-24T14:32:05-05:00');
+  assert.equal(o.k, 'abc');
+  assert.equal(o.t, Date.UTC(2026, 10, 24, 19, 32, 5));
+  assert.deepEqual(resolveAction(o.a, CATS), { type: 'stop' }); // con o sin el selector de emoji FE0F
+  assert.equal(parseOrder('?k=abc'), null);
+  assert.equal(parseOrder(''), null);
+  // «+» de zona horaria que llega como espacio
+  assert.equal(parseOrder('?a=Series&t=2026-11-24T19:32:05+00:00').t, Date.UTC(2026, 10, 24, 19, 32, 5));
+
+  assert.deepEqual(resolveAction('series', CATS), { type: 'cat', id: 'series' });
+  assert.deepEqual(resolveAction('Ensoñaciones con IA', CATS), { type: 'cat', id: 'ia' });
+  assert.deepEqual(resolveAction(' ensoñaciones   CON ia ', CATS), { type: 'cat', id: 'ia' });
+  assert.deepEqual(resolveAction(BG_ON, CATS), { type: 'bgOn' });
+  assert.deepEqual(resolveAction(BG_OFF, CATS), { type: 'bgOff' });
+  assert.equal(resolveAction('Redes sociales', CATS), null);
+  const lines = menuLines(CATS);
+  assert.equal(lines[0], STOP);
+  assert.equal(lines.at(-1), BG_OFF);
+  assert.equal(lines.length, CATS.length + 3);
+  for (const l of lines) assert.ok(resolveAction(l, CATS), `sin acción para ${l}`);
+
+  // Hora: se usa la del toque si es creíble; si viene del futuro o es muy vieja, la de llegada
+  const now = 1_000_000_000_000;
+  assert.equal(orderTime(now - 30000, now), now - 30000);
+  assert.equal(orderTime(now + 5 * 60000, now), now);
+  assert.equal(orderTime(now - 7 * H, now), now);
+  assert.equal(orderTime(null, now), now);
+});
+
+test('orders.js: cambiar de categoría, repetir la activa, parar e IA en 2º plano en paralelo', () => {
+  const t0 = 1_000_000_000_000;
+  let st = base({ sessions: [{ id: 's0', cat: 'juegos', start: t0 - 80 * 60000, end: null, note: '' }] });
+  let r = applyOrders(st, [{ a: 'Series', t: t0 }], t0, nid);
+  assert.equal(r.sessions.length, 2);
+  assert.equal(r.sessions[0].end, t0);
+  assert.equal(r.sessions[1].cat, 'series');
+  assert.equal(r.sessions[1].end, null);
+  assert.match(r.msgs[0], /Iniciaste Series · paraste Videojuegos \(1 h 20 m\)/);
+
+  st = { ...st, sessions: r.sessions };
+  r = applyOrders(st, [{ a: 'Series', t: t0 + 60000 }], t0 + 60000, nid);
+  assert.equal(r.sessions, st.sessions); // la misma: no cambia nada
+  assert.match(r.msgs[0], /ya estaba en curso/);
+
+  // IA en 2º plano no se cierra al cambiar de categoría
+  r = applyOrders(st, [{ a: BG_ON, t: t0 + 60000 }, { a: 'Proyectos', t: t0 + 120000 }], t0 + 120000, nid);
+  assert.equal(r.bg.length, 1);
+  assert.equal(r.bg[0].end, null);
+  assert.equal(r.sessions.find((s) => s.end == null).cat, 'proy');
+  st = { ...st, sessions: r.sessions, bg: r.bg };
+  r = applyOrders(st, [{ a: STOP, t: t0 + 180000 }, { a: BG_OFF, t: t0 + 240000 }], t0 + 240000, nid);
+  assert.ok(r.sessions.every((s) => s.end != null));
+  assert.equal(r.bg[0].end, t0 + 240000);
+
+  // Orden repetida (misma categoría y misma hora) no duplica la sesión
+  const once = applyOrders(base(), [{ a: 'Series', t: t0 }], t0, nid);
+  const twice = applyOrders({ ...base(), sessions: once.sessions.map((s) => ({ ...s, end: t0 + H })) }, [{ a: 'Series', t: t0 }], t0 + 2 * H, nid);
+  assert.equal(twice.sessions.length, 1);
+  // Opción desconocida: aviso, sin cambios
+  const bad = applyOrders(base(), [{ a: 'Redes sociales', t: t0 }], t0, nid);
+  assert.equal(bad.sessions.length, 0);
+  assert.match(bad.msgs[0], /No reconozco/);
+});
+
+test('orders.js: recorte al máximo por sesión, también con órdenes guardadas que llegan tarde', () => {
+  const t0 = 1_000_000_000_000;
+  // Series (máximo 3 h) quedó abierta 7 h: se recorta a 3 h y se marca para revisar
+  const st = base({ sessions: [{ id: 's1', cat: 'series', start: t0, end: null, note: '' }] });
+  const tr = trimOverdue(st, t0 + 7 * H);
+  assert.equal(tr.cut.length, 1);
+  assert.equal(tr.sessions[0].end, t0 + 3 * H);
+  assert.equal(tr.sessions[0].cut, true);
+  assert.equal(trimOverdue(st, t0 + 2 * H).cut.length, 0);
+  // Sin máximo (null) no se recorta
+  const noMax = base({ cats: CATS.map((c) => ({ ...c, max: null })), sessions: st.sessions });
+  assert.equal(trimOverdue(noMax, t0 + 30 * H).cut.length, 0);
+
+  // Orden guardada a las t0+5h (Proyectos) aplicada horas después: primero se recorta Series a t0+3h
+  const r = applyOrders(st, [{ a: 'Proyectos', t: t0 + 5 * H }], t0 + 6 * H, nid);
+  const series = r.sessions.find((s) => s.cat === 'series');
+  const proy = r.sessions.find((s) => s.cat === 'proy');
+  assert.equal(series.end, t0 + 3 * H);
+  assert.equal(series.cut, true);
+  assert.equal(proy.start, t0 + 5 * H);
+  assert.equal(proy.end, null);
+
+  // «Era real»: hasta ahora, o hasta que empezó la siguiente sesión
+  assert.equal(realEnd(r.sessions, series, t0 + 6 * H), t0 + 5 * H);
+  assert.equal(realEnd(tr.sessions, tr.sessions[0], t0 + 7 * H), t0 + 7 * H);
+
+  // IA en 2º plano con su propio máximo
+  const b = trimOverdue(base({ bg: [{ id: 'b1', cat: 'bg', start: t0, end: null }] }), t0 + 5 * H);
+  assert.equal(b.bg[0].end, t0 + 4 * H);
+  assert.equal(trimOverdue(base({ bgMax: 0, bg: [{ id: 'b1', cat: 'bg', start: t0, end: null }] }), t0 + 50 * H).cut.length, 0);
+});
+
+test('model.js e inbox.js: migración a ajustes v3 y buzón cifrado de órdenes', async () => {
+  const v2 = { settingsVersion: 2, cats: [{ id: 'series', name: 'Series', short: 'Series', color: 6, icon: 'tv', cap: 21, archived: false }, { id: 'cx', name: 'Otra', short: 'Otra', color: 1, icon: 'star', cap: null, archived: false }], groups: [] };
+  const v3 = migrateSettings(v2);
+  assert.equal(v3.settingsVersion, 3);
+  assert.equal(v3.cats[0].max, 3);
+  assert.equal(v3.cats[1].max, null);
+  assert.equal(v3.bgMax, 4);
+  assert.equal(migrateSettings(v3), v3);
+
+  const { pub, priv } = await genKeys();
+  const ct = await sealOrder(pub, { a: 'Series', t: 123 });
+  assert.ok(!ct.includes('Series'));
+  const other = await genKeys();
+  assert.deepEqual(await openOrders(priv, [ct, 'basura']), [{ a: 'Series', t: 123 }]);
+  assert.deepEqual(await openOrders(other.priv, [ct]), []); // otra clave no la abre
+});
+
+test('backup.js: IA en 2º plano y máximo por sesión viajan en el respaldo', () => {
+  const parsed = parseBackup(JSON.stringify({
+    app: 'PP', schema: 3, exportedAt: 5000,
+    settings: { ...defaults, cats: defaults.cats.map((c) => ({ ...c, max: c.id === 'series' ? 99 : c.max })), bgMax: 3 },
+    sessions: [],
+    bg: [{ id: 'b1', cat: 'bg', start: 1000, end: 2000 }, { id: 'b2', start: 3000, end: null }, { start: 9, end: 1 }],
+  }));
+  assert.equal(parsed.bg.length, 2);
+  assert.equal(parsed.bg[1].end, 5000);
+  assert.equal(parsed.settings.bgMax, 3);
+  assert.equal(parsed.settings.cats.find((c) => c.id === 'series').max, null); // 99 h no es válido
+});
