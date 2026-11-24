@@ -495,3 +495,14 @@ html[data-privacy='all'] main:not([data-tab='settings']) .screen:not(.no-privacy
 .order-ok ul { margin: 0; padding-left: 26px; color: var(--text); font-weight: 600; }
 .order-ok span { color: var(--text2); font-size: 13px; }
 .shortcut-link { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; padding: 10px 12px; border-radius: 10px; background: var(--surface2); color: var(--text2); margin: 0; user-select: all; -webkit-user-select: all; }
+.quick-menu { z-index: 60; }
+.qm-list { display: flex; flex-direction: column; }
+.qm-opt { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 6px; font-size: 17px; font-weight: 600; border-bottom: 1px solid var(--line); --c: var(--text2); }
+.qm-opt:last-child { border-bottom: 0; }
+.qm-opt:active { background: var(--surface2); }
+.qm-opt span { flex: 1; min-width: 0; }
+.qm-opt small { font-size: 12px; font-weight: 600; color: var(--c); }
+.qm-dot { flex: none; width: 14px; height: 14px; border-radius: 50%; background: var(--c); }
+.qm-opt.on { color: var(--c); }
+.qm-opt.stop { color: var(--over); }
+.qm-opt.bg { color: var(--p5); font-size: 15px; }

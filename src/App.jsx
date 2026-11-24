@@ -16,6 +16,7 @@ import { CategorySheet, GroupSheet } from './components/Config.jsx';
 import { Money } from './screens/Money.jsx';
 import { IncomeSheet, MovSheet, StatementPickDialog, StatementSheet } from './components/FinSheets.jsx';
 import { ExportSheet, ImportPasswordDialog } from './components/Sheets.jsx';
+import { QuickMenu } from './components/QuickMenu.jsx';
 import { AuthGate, PrivacyDialog, SheetAuthDialog, requestSettingsAuth, settingsNeedAuth } from './components/Privacy.jsx';
 
 const TABS = [
@@ -121,7 +122,7 @@ export function App() {
     if (st.updateReady) toast('Hay una versión nueva de PP', { kind: 'info', long: true, action: { label: 'Actualizar', fn: applyUpdate } });
   }, [st.updateReady]);
 
-  if (st.ready && st.locked) return <><div class="ambient" aria-hidden="true" /><LockScreen /></>;
+  if (st.ready && st.locked) return <><div class="ambient" aria-hidden="true" /><LockScreen />{st.quickMenu && <QuickMenu />}</>;
 
   const Screen = { home: Home, log: Log, stats: Stats, money: Money, settings: Settings }[st.tab] || Home;
   const gate = st.tab === 'settings' && settingsNeedAuth(st) && !st.settingsAuth;
@@ -144,6 +145,7 @@ export function App() {
         ))}
       </nav>}
       <Toast t={st.toast} />
+      {st.quickMenu && <QuickMenu />}
       {st.sheet?.type === 'edit' && <EditSheet id={st.sheet.id} />}
       {st.sheet?.type === 'reset' && <ResetSheet />}
       {st.sheet?.type === 'cat' && <CategorySheet id={st.sheet.id} />}

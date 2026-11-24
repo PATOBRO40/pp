@@ -315,8 +315,15 @@ async function run() {
     let inbox = await kv('inbox');
     assert.equal(inbox.length, 1);
     assert.ok(!JSON.stringify(inbox).includes('Lectura'), 'La orden debe guardarse cifrada');
-    await page.goto(orderUrl('▶ IA en 2º plano'));
-    await page.waitForSelector('.lock-box');
+    // Enlace del atajo real (a=menu): PP muestra el menú con los nombres guardados y la orden elegida va al buzón
+    await page.goto(orderUrl('menu'));
+    await page.waitForSelector('.quick-menu');
+    assert.match(await page.locator('.quick-menu').textContent(), /Lectura/);
+    await checkNoOverflow(page, 'Menú del atajo');
+    await shot(page, '06a-shortcut-menu.png');
+    await page.getByRole('button', { name: 'Iniciar IA en 2º plano' }).click();
+    await page.waitForSelector('.quick-menu', { state: 'detached' });
+    await page.waitForSelector('.order-ok');
     assert.equal((await kv('inbox')).length, 2);
     await page.goto(orderUrl('Lectura', 'codigo-falso'));
     await page.waitForSelector('.lock-orders .msg.warn');
@@ -342,7 +349,7 @@ async function run() {
     await page.locator('.auth-gate input[type="password"]').fill('1234');
     await page.getByRole('button', { name: 'Entrar' }).click();
     await page.waitForSelector('.shortcut-link');
-    assert.equal(await page.locator('.shortcut-link').textContent(), `webapp://localhost:${PORT}/?k=${sc.k}&a=`);
+    assert.equal(await page.locator('.shortcut-link').textContent(), `webapp://localhost:${PORT}/?k=${sc.k}&a=menu`);
     await checkNoOverflow(page, 'Ajustes con atajo');
     await page.locator('.shortcut-link').scrollIntoViewIfNeeded();
     await shot(page, '08-shortcut-settings.png');

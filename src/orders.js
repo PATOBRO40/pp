@@ -1,8 +1,9 @@
 // Órdenes que llegan desde el atajo de iOS (Botón de Acción) y recorte de sesiones olvidadas.
 // Todo aquí es lógica pura (sin IndexedDB ni DOM), para poder probarla aparte.
 //
-// El atajo abre  webapp://<host>/pp/?k=<código>&a=<opción del menú>[&t=<hora ISO>]
-//   a = una línea del menú: «⏹ Parar», el nombre de una categoría, «▶ IA en 2º plano» o «⏹ IA en 2º plano».
+// El atajo abre  webapp://<host>/pp/?k=<código>&a=menu  y PP muestra el menú «¿Qué haces ahora?».
+// También acepta una opción directa: a = «⏹ Parar», el nombre de una categoría, «▶ IA en 2º plano»
+// o «⏹ IA en 2º plano», con t=<hora ISO> opcional.
 //   k = código secreto del atajo (evita que una página web mande órdenes falsas).
 //   t = hora del toque (opcional); si falta, cuenta la hora en que PP recibe la orden.
 import { HOUR, fmtDur } from './time.js';
@@ -11,6 +12,7 @@ export const STOP = '⏹ Parar';
 export const BG_ON = '▶ IA en 2º plano';
 export const BG_OFF = '⏹ IA en 2º plano';
 export const BG_NAME = 'IA en 2º plano';
+export const MENU = 'menu';
 const MAX_LABEL = 120;
 const MAX_AGE = 6 * HOUR; // una hora de toque más vieja que esto se ignora (se usa la de llegada)
 
@@ -42,6 +44,9 @@ export function orderTime(t, receivedAt) {
   if (t == null || t > receivedAt + 60000 || receivedAt - t > MAX_AGE) return receivedAt;
   return Math.min(t, receivedAt);
 }
+
+/** ¿La orden pide mostrar el menú dentro de PP? */
+export const isMenu = (a) => norm(a) === MENU;
 
 /** Traduce una opción del menú a una acción. null si no se reconoce. */
 export function resolveAction(a, cats) {

@@ -49,7 +49,9 @@ Una sesión que cruza la medianoche es un solo registro. Se reparte entre días 
 
 ## Atajo del Botón de Acción
 
-Un atajo de iOS abre `webapp://<host>/pp/?k=<código>&a=<opción>` (con `webapp://` iOS abre la app instalada y no Safari). Opciones: `⏹ Parar`, el nombre de una categoría, `▶ IA en 2º plano` y `⏹ IA en 2º plano`; `t=<hora ISO>` es opcional. La lista del menú y el enlace se copian desde **Ajustes → Atajo del Botón de Acción**.
+El atajo de iOS tiene una sola acción, «Abrir URL», con el enlace que se copia en **Ajustes → Atajo del Botón de Acción**: `webapp://<host>/pp/?k=<código>&a=menu` (con `webapp://` iOS abre la app instalada y no el navegador). PP muestra el menú **«¿Qué haces ahora?»** (`QuickMenu`): Parar, las categorías activas e iniciar o parar la IA en 2º plano. También acepta una opción directa en `a` (`⏹ Parar`, el nombre de una categoría, `▶ IA en 2º plano`, `⏹ IA en 2º plano`) con `t=<hora ISO>` opcional.
+
+- Para mostrar el menú con PP bloqueada, los nombres y colores de las categorías activas se guardan **sin cifrar** en kv `shortcut.menu`. Los tiempos y sesiones siguen cifrados.
 
 - Elegir otra categoría para la actual y empieza la nueva en el mismo instante; elegir la que ya está activa no hace nada.
 - `k` es un código secreto (kv `shortcut`) para que una página web no pueda mandar órdenes. Se puede cambiar.

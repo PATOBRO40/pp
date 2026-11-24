@@ -8,7 +8,7 @@ import { fmtDur } from './time.js';
 import { catById, defaults, liveCats, migrateSettings } from './model.js';
 import { clearClassifiedCache } from './fin/classify.js';
 import { defaultFin, migrateFin } from './fin/model.js';
-import { BG_NAME, applyOrders, closeLane, orderTime, realEnd, resolveAction, trimOverdue } from './orders.js';
+import { BG_NAME, applyOrders, closeLane, isMenu, orderTime, realEnd, resolveAction, trimOverdue } from './orders.js';
 import { genKeys, newCode, openOrders, sealOrder } from './inbox.js';
 
 export const now = () => Date.now();
@@ -29,6 +29,7 @@ let state = {
   shortcut: null,      // atajo del Botón de Acción: { k: código, pub: clave pública del buzón | null }
   inboxCount: 0,       // órdenes del atajo guardadas mientras PP está bloqueada
   inboxNotes: [],      // órdenes recibidas en esta apertura, para confirmarlas en la pantalla de bloqueo
+  quickMenu: false,    // menú «¿Qué haces ahora?» abierto desde el atajo
   fin: defaultFin(),   // Dinero: solo existe con el bloqueo activo (va dentro del cifrado)
   meta: { installedAt: Date.now(), lastBackupAt: null, backupSnoozedUntil: 0, installHintDismissed: false },
   tab: 'home',
@@ -115,6 +116,7 @@ export function set(patch, opts) {
   if (sealed() && !V.isOpen()) return; // bloqueada: no hay nada que guardar
   if (state.sessions !== prev.sessions) syncSessions(prev.sessions, state.sessions);
   if (state.bg !== prev.bg) { const bg = state.bg; persist(() => (sealed() ? writeVault() : db.setKV('bg', bg))); }
+  if (state.cats !== prev.cats) syncMenu();
   const finChanged = state.fin !== prev.fin && sealed();
   const cur = JSON.stringify(pick(state));
   const settingsChanged = cur !== lastSettings;
@@ -151,6 +153,22 @@ export function setMeta(patch) {
 }
 
 const syncUi = () => setMeta({ ui: { theme: state.theme, variant: state.variant, privacy: state.privacy } });
+
+/**
+ * Copia en claro de los nombres y colores de las categorías activas, para que el menú del atajo
+ * se pueda mostrar con PP bloqueada. Solo nombres: tiempos y sesiones siguen cifrados.
+ */
+function syncMenu() {
+  if (!state.shortcut || (sealed() && !V.isOpen())) return;
+  const menu = liveCats(state).map((c) => ({ label: c.name, color: c.color }));
+  if (JSON.stringify(menu) === JSON.stringify(state.shortcut.menu)) return;
+  const rec = { ...state.shortcut, menu };
+  apply({ shortcut: rec });
+  persist(() => db.setKV('shortcut', rec));
+}
+
+/** ¿Están los datos descifrados en memoria? */
+export const dataOpen = () => !sealed() || V.isOpen();
 
 /** Guarda el registro del atajo (código y clave pública del buzón). */
 function saveShortcut(rec) {
@@ -248,6 +266,7 @@ export function openVault(master) {
     }
     if (rewrite) await writeVault();
     if (state.meta.ui?.privacy !== state.privacy) syncUi();
+    syncMenu();
     await drainInbox();
   });
 }
@@ -255,7 +274,7 @@ export function openVault(master) {
 /** Bloquea la app. Con cifrado, guarda lo pendiente y borra de la memoria la clave y los datos. */
 export function lockApp() {
   if (state.locked) return;
-  apply({ locked: true, sheet: null, toast: null, settingsAuth: false, finCfgAuth: false });
+  apply({ locked: true, sheet: null, toast: null, settingsAuth: false, finCfgAuth: false, quickMenu: false });
   if (!sealed() || !V.isOpen()) return;
   if (settingsTimer != null || settingsDirty || finDirty) {
     clearTimeout(settingsTimer);
@@ -309,7 +328,7 @@ export function wipeData() {
   finDirty = false;
   return serial(async () => {
     const settings = sealed() ? { ...freshDefaults(), theme: state.theme, variant: state.variant } : pick(state);
-    const shortcut = { k: state.shortcut?.k || newCode(), pub: null };
+    const shortcut = { k: state.shortcut?.k || newCode(), pub: null, menu: null };
     await db.commit({ clearSessions: true, kv: { settings, vault: null, lock: null, bg: null, inbox: null, shortcut } });
     V.close();
     inboxPriv = null;
@@ -347,6 +366,7 @@ export async function init() {
     lastSettings = JSON.stringify(pick(state));
     if (loaded !== settings) persist(() => db.setKV('settings', pick(state)));
     if (!meta) setMeta({});
+    syncMenu();
   } catch {
     apply({ ready: true, dbError: true });
   } finally {
@@ -485,6 +505,10 @@ export function receiveOrder(raw, receivedAt = now()) {
     orderNote({ label: raw.a, t: receivedAt, error: 'El atajo tiene un código antiguo o incorrecto. En PP, ve a Ajustes → Atajo del Botón de Acción y copia otra vez el enlace.' });
     return Promise.resolve();
   }
+  if (isMenu(raw.a)) {
+    apply({ quickMenu: true });
+    return Promise.resolve();
+  }
   const t = orderTime(raw.t, receivedAt);
   if (!sealed() || V.isOpen()) {
     if (!state.ready) return Promise.resolve();
@@ -509,6 +533,12 @@ export function receiveOrder(raw, receivedAt = now()) {
     await db.setKV('inbox', next);
     apply({ inboxCount: next.length, inboxNotes: [...state.inboxNotes, { label: raw.a, t }] });
   }).catch(() => orderNote({ label: raw.a, t, error: 'No se pudo guardar la orden. Inténtalo de nuevo.' }));
+}
+
+/** Opción elegida en el menú «¿Qué haces ahora?»: cuenta la hora del toque. */
+export function chooseQuick(label) {
+  apply({ quickMenu: false });
+  return receiveOrder({ a: label, k: state.shortcut?.k }, now());
 }
 
 /** Cambia el código secreto del atajo (el enlace anterior deja de funcionar). */
