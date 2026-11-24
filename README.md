@@ -49,7 +49,7 @@ Una sesión que cruza la medianoche es un solo registro. Se reparte entre días 
 
 ## Atajo del Botón de Acción
 
-El atajo de iOS tiene una sola acción, «Abrir URL», con el enlace que se copia en **Ajustes → Atajo del Botón de Acción**: `webapp://<host>/pp/?k=<código>&a=menu` (con `webapp://` iOS abre la app instalada y no el navegador). PP muestra el menú **«¿Qué haces ahora?»** (`QuickMenu`): Parar, las categorías activas e iniciar o parar la IA en 2º plano. También acepta una opción directa en `a` (`⏹ Parar`, el nombre de una categoría, `▶ IA en 2º plano`, `⏹ IA en 2º plano`) con `t=<hora ISO>` opcional.
+El atajo de iOS tiene una sola acción, «Abrir URL», con el enlace que se copia en **Ajustes → Atajo del Botón de Acción**: `webapp://<host>/pp/?k=<código>&a=menu` (con `webapp://` iOS abre la app instalada y no el navegador). El enlace es `webapp://<host>/pp/?k=<código>&a=menu#menu`: si iOS descarta la consulta, la señal `#menu` hace que PP muestre el menú **«¿Qué haces ahora?»** (`QuickMenu`). Abrir PP normalmente no lo muestra, salvo que se active «Menú también al abrir PP» en Ajustes (`shortcut.openMenu`). Ajustes muestra la «Última apertura» de PP para diagnosticar qué llega desde el atajo. El menú ofrece: Parar, las categorías activas e iniciar o parar la IA en 2º plano. También acepta una opción directa en `a` (`⏹ Parar`, el nombre de una categoría, `▶ IA en 2º plano`, `⏹ IA en 2º plano`) con `t=<hora ISO>` opcional.
 
 - Para mostrar el menú con PP bloqueada, los nombres y colores de las categorías activas se guardan **sin cifrar** en kv `shortcut.menu`. Los tiempos y sesiones siguen cifrados.
 

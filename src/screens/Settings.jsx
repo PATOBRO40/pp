@@ -3,8 +3,8 @@ import { Icon } from '../components/Icon.jsx';
 import { PrivacyChoice } from '../components/Privacy.jsx';
 import { Row, Stepper, Toggle } from '../components/Controls.jsx';
 import { catById } from '../model.js';
-import { fmtDM, fmtDur } from '../time.js';
-import { addCategory, addGroup, newShortcutCode, resetSettings, set, setArchived, toast, updateCategory, updateGroup, useStore } from '../store.js';
+import { fmtDM, fmtDur, fmtTime } from '../time.js';
+import { addCategory, addGroup, newShortcutCode, setOpenMenu, resetSettings, set, setArchived, toast, updateCategory, updateGroup, useStore } from '../store.js';
 import { BG_NAME, MENU } from '../orders.js';
 import { parseBackup } from '../backup.js';
 import { checkUpdate, isStandalone } from '../pwa.js';
@@ -65,7 +65,7 @@ export function Settings() {
 
   const last = st.meta.lastBackupAt;
   const base = location.pathname.replace(/[^/]*$/, '');
-  const link = st.shortcut ? `webapp://${location.host}${base}?k=${st.shortcut.k}&a=${MENU}` : '';
+  const link = st.shortcut ? `webapp://${location.host}${base}?k=${st.shortcut.k}&a=${MENU}#${MENU}` : '';
   const copy = async (text, what) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -159,9 +159,13 @@ export function Settings() {
         <Row label={BG_NAME} hint="Pista aparte: no cuenta en topes">
           <Stepper value={st.bgMax || 0} step={0.5} min={0} max={24} unit="h" onChange={(v) => set({ bgMax: v })} />
         </Row>
-        <p class="fine">Tu atajo de iOS solo necesita la acción «Abrir URL» con este enlace. Al usar el Botón de Acción, PP abre el menú «¿Qué haces ahora?».</p>
+        <Row label="Menú también al abrir PP" hint="Además del atajo, cada vez que abres PP o vuelves a ella">
+          <Toggle on={st.shortcut?.openMenu === true} onChange={setOpenMenu} />
+        </Row>
+        <p class="fine">Tu atajo de iOS solo tiene que abrir PP (acción «Abrir URL» con este enlace).</p>
         <button class="btn primary wide" onClick={() => copy(link, 'Enlace del atajo')} disabled={!link}>Copiar enlace del atajo</button>
         <p class="shortcut-link" aria-label="Enlace del atajo">{link}</p>
+        {st.launch && <p class="fine">Última apertura de PP ({fmtTime(st.launch.t)}): <span class="shortcut-link inline">{st.launch.url}</span></p>}
         <button class="btn ghost wide" onClick={() => { newShortcutCode(); toast('Código cambiado: copia otra vez el enlace en tu atajo', { kind: 'warn', long: true }); }}><Icon name="reset" size={18} /> Cambiar código del atajo</button>
         <p class="fine">El código evita que una página web le mande órdenes a PP. Con PP bloqueada, las órdenes se guardan cifradas y se aplican al entrar. Para mostrar el menú sin desbloquear, los nombres de las categorías activas se guardan sin cifrar (los tiempos no).</p>
       </section>

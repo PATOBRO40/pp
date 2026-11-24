@@ -9,7 +9,7 @@
 // Un registro sin "v" es de la versión 1.2–1.3 (solo un hash, datos en claro): se migra
 // al entrar con la contraseña.
 import * as V from './vault.js';
-import { disableVault, enableVault, flushPending, getState, lockApp, openVault, set, setLock, wipeData } from './store.js';
+import { disableVault, enableVault, flushPending, getState, lockApp, openVault, set, setLock, showMenuOnOpen, wipeData } from './store.js';
 
 const ITERATIONS = 310000;
 const MAX_FAILS = 5;
@@ -266,10 +266,12 @@ export function wipeAndUnlock() {
  */
 export function initAutoLock() {
   let hiddenAt = null;
+  let awayAt = null; // desde cuándo está la app en segundo plano (con o sin bloqueo)
   const cover = (on) => document.documentElement.classList.toggle('covered', on);
   const onHide = () => {
     flushPending();
     cover(true);
+    if (awayAt == null) awayAt = Date.now();
     const { lock, locked } = getState();
     if (!lock || locked || authBusy) { hiddenAt = null; return; }
     if (hiddenAt == null) hiddenAt = Date.now();
@@ -280,6 +282,9 @@ export function initAutoLock() {
     const paused = Date.now() < pickerPauseUntil;
     pickerPauseUntil = 0;
     if (lock && !locked && !authBusy && !paused && hiddenAt != null && Date.now() - hiddenAt >= lock.grace) lockApp();
+    // Volver a PP tras un rato fuera (no tras Face ID, Archivos o Compartir) abre el menú del atajo
+    if (!authBusy && !paused && awayAt != null && Date.now() - awayAt >= 2000) showMenuOnOpen();
+    awayAt = null;
     hiddenAt = null;
     cover(false);
   };

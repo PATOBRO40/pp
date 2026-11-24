@@ -506,3 +506,4 @@ html[data-privacy='all'] main:not([data-tab='settings']) .screen:not(.no-privacy
 .qm-opt.on { color: var(--c); }
 .qm-opt.stop { color: var(--over); }
 .qm-opt.bg { color: var(--p5); font-size: 15px; }
+.shortcut-link.inline { display: inline; padding: 2px 6px; }

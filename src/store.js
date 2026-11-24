@@ -192,7 +192,7 @@ export function enableVault(lock, master) {
     try {
       const keys = await genKeys();
       inboxPriv = keys.priv;
-      shortcut = { k: state.shortcut?.k || newCode(), pub: keys.pub };
+      shortcut = { ...state.shortcut, k: state.shortcut?.k || newCode(), pub: keys.pub };
       const vault = await V.seal(vaultData());
       await db.commit({ clearSessions: true, kv: { vault, settings: null, bg: null, inbox: null, lock, shortcut } });
     } catch (e) {
@@ -261,7 +261,7 @@ export function openVault(master) {
       const keys = await genKeys();
       inboxPriv = keys.priv;
       await db.setKV('vault', await V.seal(vaultData()));
-      await saveShortcut({ k: state.shortcut?.k || newCode(), pub: keys.pub });
+      await saveShortcut({ ...state.shortcut, k: state.shortcut?.k || newCode(), pub: keys.pub });
       rewrite = false;
     }
     if (rewrite) await writeVault();
@@ -311,7 +311,7 @@ export function disableVault() {
   settingsDirty = false;
   finDirty = false;
   return serial(async () => {
-    const shortcut = { k: state.shortcut?.k || newCode(), pub: null };
+    const shortcut = { ...state.shortcut, k: state.shortcut?.k || newCode(), pub: null };
     await db.commit({ clearSessions: true, putSessions: state.sessions, kv: { settings: pick(state), bg: state.bg, vault: null, lock: null, inbox: null, shortcut } });
     V.close();
     inboxPriv = null;
@@ -328,7 +328,7 @@ export function wipeData() {
   finDirty = false;
   return serial(async () => {
     const settings = sealed() ? { ...freshDefaults(), theme: state.theme, variant: state.variant } : pick(state);
-    const shortcut = { k: state.shortcut?.k || newCode(), pub: null, menu: null };
+    const shortcut = { ...state.shortcut, k: state.shortcut?.k || newCode(), pub: null, menu: null };
     await db.commit({ clearSessions: true, kv: { settings, vault: null, lock: null, bg: null, inbox: null, shortcut } });
     V.close();
     inboxPriv = null;
@@ -533,6 +533,30 @@ export function receiveOrder(raw, receivedAt = now()) {
     await db.setKV('inbox', next);
     apply({ inboxCount: next.length, inboxNotes: [...state.inboxNotes, { label: raw.a, t }] });
   }).catch(() => orderNote({ label: raw.a, t, error: 'No se pudo guardar la orden. Inténtalo de nuevo.' }));
+}
+
+/**
+ * Al abrir PP (o volver a ella) muestra el menú «¿Qué haces ahora?», si está activado.
+ * iOS abre la app instalada pero descarta lo que va tras la dirección (?a=menu), así que
+ * el atajo del Botón de Acción solo abre PP y el menú sale por esta vía.
+ */
+export function showMenuOnOpen(fromShortcut = false) {
+  const s = state;
+  if (!s.ready || s.quickMenu || s.sheet || (!fromShortcut && s.shortcut?.openMenu !== true)) return;
+  if (s.locked && !(sealed() ? s.shortcut?.menu?.length : true)) return;
+  apply({ quickMenu: true });
+}
+
+/** Dirección con la que se abrió PP la última vez (diagnóstico del atajo, solo en memoria). */
+export function setLaunch(url, t) {
+  apply({ launch: { url, t } });
+}
+
+/** Activa o desactiva el menú al abrir PP (se guarda en claro: hace falta antes de desbloquear). */
+export function setOpenMenu(on) {
+  const rec = { ...(state.shortcut || { k: newCode(), pub: null }), openMenu: on };
+  apply({ shortcut: rec });
+  persist(() => db.setKV('shortcut', rec));
 }
 
 /** Opción elegida en el menú «¿Qué haces ahora?»: cuenta la hora del toque. */

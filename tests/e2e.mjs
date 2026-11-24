@@ -70,7 +70,19 @@ async function run() {
 
     await page.goto(URL, { waitUntil: 'networkidle' });
     await page.waitForSelector('.cards');
+    // Abrir PP normalmente no muestra el menú; solo el enlace del atajo (#menu, aunque iOS borre la consulta)
+    await page.waitForTimeout(500);
+    assert.equal(await page.locator('.quick-menu').count(), 0, 'El menú no debe salir al abrir PP normalmente');
     await checkNoOverflow(page, 'Inicio');
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
+    await page.waitForTimeout(2100);
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); });
+    await page.waitForTimeout(300);
+    assert.equal(await page.locator('.quick-menu').count(), 0, 'El menú no debe salir al volver a PP');
+    await page.goto(URL + '#menu');
+    await page.waitForSelector('.quick-menu');
+    assert.equal(await page.evaluate(() => location.hash), '');
+    await page.locator('.quick-menu').getByRole('button', { name: 'Cancelar' }).click();
 
     // 1. Tiempo: iniciar y detener sesión corta, verificar que Editar permite añadir nota (< 1 min) y borrar fecha no rompe
     await page.getByRole('button', { name: /Iniciar Proyectos/i }).click();
@@ -349,9 +361,9 @@ async function run() {
     await page.locator('.auth-gate input[type="password"]').fill('1234');
     await page.getByRole('button', { name: 'Entrar' }).click();
     await page.waitForSelector('.shortcut-link');
-    assert.equal(await page.locator('.shortcut-link').textContent(), `webapp://localhost:${PORT}/?k=${sc.k}&a=menu`);
+    assert.equal(await page.locator('p.shortcut-link').first().textContent(), `webapp://localhost:${PORT}/?k=${sc.k}&a=menu#menu`);
     await checkNoOverflow(page, 'Ajustes con atajo');
-    await page.locator('.shortcut-link').scrollIntoViewIfNeeded();
+    await page.locator('p.shortcut-link').first().scrollIntoViewIfNeeded();
     await shot(page, '08-shortcut-settings.png');
     await page.getByRole('button', { name: 'Inicio', exact: true }).click();
     await page.waitForSelector('.cards');
