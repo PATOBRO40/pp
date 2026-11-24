@@ -1,17 +1,42 @@
 // Hojas de Dinero: vista previa de extractos, detalle/registro de un movimiento e ingreso fijo.
-import { useState } from 'preact/hooks';
+import { useRef, useState } from 'preact/hooks';
 import { Icon } from './Icon.jsx';
 import { HIDE } from './Privacy.jsx';
 import { newId, set, setFin, toast, useStore } from '../store.js';
-import { ACCOUNTS, acctName, finCat, fmtMoney, fmtSigned, TYPES } from '../fin/model.js';
+import { ACCOUNTS, acctName, finCat, fmtMoney, fmtSigned, parsePesos, prettyDesc, TYPES } from '../fin/model.js';
 import { classified } from '../fin/classify.js';
 import { applyCorrection, forgetParty, sameParty } from '../fin/actions.js';
-import { commitStatements, preview, retryWithPassword } from '../fin/flow.js';
+import { commitStatements, preview, readStatements, retryWithPassword } from '../fin/flow.js';
 import { periodLabel, periodOf, todayISO } from '../fin/stats.js';
-import { prettyDesc } from '../screens/Money.jsx';
+import { pauseAutoLock, resumeAutoLock } from '../lock.js';
 
 const close = () => set({ sheet: null });
 const BANK = { nequi: 'Nequi', nu: 'Nu' };
+
+/** Diálogo para elegir PDFs tras confirmar identidad en modo de privacidad. */
+export function StatementPickDialog() {
+  const fileRef = useRef(null);
+  const onFiles = async (e) => {
+    resumeAutoLock();
+    const files = [...(e.currentTarget.files || [])];
+    e.currentTarget.value = '';
+    if (files.length) await readStatements(files);
+    else close();
+  };
+  return (
+    <div class="sheet-wrap center" onClick={close}>
+      <div class="dialog" onClick={(e) => e.stopPropagation()}>
+        <h2>Importar extractos</h2>
+        <p>Elige los extractos en PDF de Nequi o Nu desde tu dispositivo.</p>
+        <input ref={fileRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={onFiles} />
+        <div class="sheet-actions">
+          <button type="button" class="btn ghost" onClick={close}>Cancelar</button>
+          <button type="button" class="btn primary" onClick={() => { pauseAutoLock(); fileRef.current.click(); }}>Elegir archivos PDF</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function CatChips({ f, value, onPick, small }) {
   return (
@@ -100,10 +125,16 @@ function MovDetail({ f, m }) {
     if (all && n > 1) toast(`Aplicado a ${n} movimientos de «${c.party}», en todos los meses`, { kind: 'ok' });
   };
   const remove = () => {
-    const prev = f.movs;
-    setFin((x) => ({ ...x, movs: x.movs.filter((y) => y.id !== m.id) }));
+    setFin((x) => ({ ...x, movs: x.movs.filter((y) => y.id !== m.id) }), { immediate: true });
     close();
-    toast('Registro eliminado', { action: { label: 'Deshacer', fn: () => setFin((x) => ({ ...x, movs: prev })) } });
+    toast('Registro eliminado', {
+      action: {
+        label: 'Deshacer',
+        fn: () => setFin((x) => (x.movs.some((y) => y.id === m.id)
+          ? x
+          : { ...x, movs: [...x.movs, m].sort((a, b) => a.date.localeCompare(b.date)) }), { immediate: true }),
+      },
+    });
   };
   const hasRule = !!(same.key && f.memo[same.key]);
   return (
@@ -118,7 +149,7 @@ function MovDetail({ f, m }) {
 
         {same.key && !isManual && (
           <div class="field"><span>Aplicar cambios a</span>
-            <div class="seg small">
+            <div class="seg small wrap">
               <button class={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')}>Todos los de este nombre ({same.count})</button>
               <button class={scope === 'one' ? 'on' : ''} onClick={() => setScope('one')}>Solo este</button>
             </div>
@@ -126,7 +157,7 @@ function MovDetail({ f, m }) {
         )}
 
         <div class="field"><span>Qué es</span>
-          <div class="seg small">
+          <div class="seg small wrap">
             {typeOpts.map(([t, l]) => <button key={t} class={c.type === t ? 'on' : ''} onClick={() => choose(t)}>{l}</button>)}
           </div>
         </div>
@@ -158,11 +189,11 @@ function MovDetail({ f, m }) {
 function NewMov({ f }) {
   const [type, setType] = useState('gasto');
   const [amount, setAmount] = useState('');
-  const [cat, setCat] = useState('cmin');
+  const [cat, setCat] = useState(f.cats.some((c) => c.id === 'cmin') ? 'cmin' : f.cats[0].id);
   const [acct, setAcct] = useState('efectivo');
   const [date, setDate] = useState(todayISO());
   const [note, setNote] = useState('');
-  const pesos = Math.round(parseFloat(String(amount).replace(/[^\d,.]/g, '').replace(/\./g, '').replace(',', '.')) || 0);
+  const pesos = parsePesos(amount);
   const save = () => {
     const cents = pesos * 100 * (type === 'gasto' ? -1 : 1);
     const desc = note.trim() || (type === 'gasto' ? finCat(f, cat).name : 'Ingreso');
@@ -170,7 +201,7 @@ function NewMov({ f }) {
       ...x,
       movs: [...x.movs, { id: 'man:' + newId(), acct, date, desc, amount: cents, src: 'manual', manual: { type, cat: type === 'gasto' ? cat : null } }]
         .sort((a, b) => a.date.localeCompare(b.date)),
-    }));
+    }), { immediate: true });
     close();
     toast('Movimiento registrado', { kind: 'ok' });
   };
@@ -208,17 +239,17 @@ export function IncomeSheet({ id }) {
   const f = st.fin;
   const cur = f.incomes.find((i) => i.id === id);
   const [name, setName] = useState(cur?.name || 'Sueldo');
-  const [amount, setAmount] = useState(cur ? String(cur.amount / 100) : '');
+  const [amount, setAmount] = useState(cur ? String(Math.round(cur.amount / 100)) : '');
   const [day, setDay] = useState(cur?.day || 1);
   const [acct, setAcct] = useState(cur?.acct || 'nequi');
   const [from, setFrom] = useState(cur?.from || periodOf(todayISO(), f.monthStart));
-  const pesos = Math.round(parseFloat(String(amount).replace(/[^\d]/g, '')) || 0);
+  const pesos = parsePesos(amount);
   const save = () => {
     const rec = { id: cur?.id || 'inc' + newId(), name: name.trim() || 'Ingreso fijo', amount: pesos * 100, day: Math.min(28, Math.max(1, +day || 1)), acct, from };
-    setFin((x) => ({ ...x, incomes: cur ? x.incomes.map((i) => (i.id === cur.id ? rec : i)) : [...x.incomes, rec] }));
+    setFin((x) => ({ ...x, incomes: cur ? x.incomes.map((i) => (i.id === cur.id ? rec : i)) : [...x.incomes, rec] }), { immediate: true });
     close();
   };
-  const remove = () => { setFin((x) => ({ ...x, incomes: x.incomes.filter((i) => i.id !== id) })); close(); };
+  const remove = () => { setFin((x) => ({ ...x, incomes: x.incomes.filter((i) => i.id !== id) }), { immediate: true }); close(); };
   return (
     <div class="sheet-wrap" onClick={close}>
       <div class="sheet" onClick={(e) => e.stopPropagation()}>

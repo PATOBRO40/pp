@@ -1,6 +1,6 @@
 // Registro del service worker y flujo de actualización.
 // La versión nueva NO se activa sola: se avisa y el usuario decide (evita mezclar versiones).
-import { set, toast } from './store.js';
+import { flushPending, set, toast } from './store.js';
 
 let reg = null;
 let updating = false;
@@ -32,8 +32,10 @@ export function registerSW() {
 }
 
 export function applyUpdate() {
+  flushPending();
+  if (!reg?.waiting) return;
   updating = true;
-  reg?.waiting?.postMessage('SKIP_WAITING');
+  reg.waiting.postMessage('SKIP_WAITING');
 }
 
 export async function checkUpdate() {

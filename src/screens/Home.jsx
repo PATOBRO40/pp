@@ -1,9 +1,8 @@
 import { Icon } from '../components/Icon.jsx';
-import { PrivacyButton } from '../components/Privacy.jsx';
+import { PrivacyButton, openProtectedSheet } from '../components/Privacy.jsx';
 import { CapBar } from '../components/CapBar.jsx';
-import { DAY, fmtClock, fmtDM, fmtDate, fmtWeekday, fmtDur, fmtTime, rangeTotals, startOfDay, startOfWeek } from '../time.js';
+import { DAY, fmtClock, fmtDM, fmtWeekday, fmtDur, fmtTime, rangeTotals, startOfDay, startOfWeek } from '../time.js';
 import { activeSession, set, setMeta, toggleCat, useNow, useStore } from '../store.js';
-import { exportBackup } from '../backup.js';
 import { isStandalone } from '../pwa.js';
 import { sum } from '../stats.js';
 import { catById, catsWithData, liveCats, topLevelCaps } from '../model.js';
@@ -37,7 +36,7 @@ export function Home() {
           <div>
             <b>No se pudo guardar en este dispositivo</b>
             <span>El almacenamiento no responde (¿modo privado?). Exporta un respaldo para no perder datos.</span>
-            <div class="banner-actions"><button onClick={exportBackup}>Exportar ahora</button></div>
+            <div class="banner-actions"><button onClick={() => openProtectedSheet({ type: 'export' }, 'Exportar respaldo')}>Exportar ahora</button></div>
           </div>
         </div>
       )}
@@ -49,7 +48,7 @@ export function Home() {
             <b>Toca hacer un respaldo</b>
             <span>{st.meta.lastBackupAt ? 'Hace más de 7 días que no exportas.' : 'Aún no has exportado ninguno.'} Guárdalo en Archivos o iCloud.</span>
             <div class="banner-actions">
-              <button onClick={exportBackup}>Exportar ahora</button>
+              <button onClick={() => openProtectedSheet({ type: 'export' }, 'Exportar respaldo')}>Exportar ahora</button>
               <button class="quiet" onClick={() => setMeta({ backupSnoozedUntil: t + DAY })}>Mañana</button>
             </div>
           </div>
@@ -75,7 +74,7 @@ export function Home() {
             <span class="pv">Llevas {fmtDur(t - act.start)} en «{actCat.short}» desde las {fmtTime(act.start)}.</span>
             <div class="banner-actions">
               <button onClick={() => toggleCat(act.cat)}>Finalizar ahora</button>
-              <button onClick={() => set({ sheet: { type: 'edit', id: act.id } })}>Corregir hora</button>
+              <button onClick={() => openProtectedSheet({ type: 'edit', id: act.id }, 'Editar sesión')}>Corregir hora</button>
               <button class="quiet" onClick={() => set({ dismissedForgot: act.id })}>Sigue en curso</button>
             </div>
           </div>
@@ -101,7 +100,7 @@ export function Home() {
         })}
       </section>
 
-      <button class="btn ghost" onClick={() => set({ sheet: { type: 'reset' } })}><Icon name="reset" size={18} /> Reiniciar tiempo</button>
+      <button class="btn ghost" onClick={() => openProtectedSheet({ type: 'reset' }, 'Reiniciar tiempo')}><Icon name="reset" size={18} /> Reiniciar tiempo</button>
 
       <h3 class="sec">Topes de la semana</h3>
       <section class="screen-caps">

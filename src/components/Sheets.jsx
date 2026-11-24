@@ -3,25 +3,28 @@ import { Icon } from './Icon.jsx';
 import { HOUR, fmtDM, fmtDur, fromLocalInput, rangeTotals, startOfDay, startOfWeek, toLocalInput } from '../time.js';
 import { activeSession, deleteSession, newId, now, resetTime, saveSession, set, useNow, useStore } from '../store.js';
 import { applyImport, decryptBackup, makeBackupFile, parseBackup, shareBackup } from '../backup.js';
+import { BackupFormatError } from '../vault.js';
 import { hasFinData } from '../fin/model.js';
 import { liveCats } from '../model.js';
 
 /** Hoja inferior para crear/editar una sesión. */
-export function EditSheet({ id, defaults }) {
+export function EditSheet({ id }) {
   const st = useStore();
   const existing = id ? st.sessions.find((s) => s.id === id) : null;
   const t = now();
-  const base = existing || defaults || { cat: liveCats(st)[0].id, start: t - HOUR, end: t, note: '' };
+  const base = existing || { cat: liveCats(st)[0]?.id || st.cats[0]?.id, start: t - HOUR, end: t, note: '' };
   const [cat, setCat] = useState(base.cat);
   const [start, setStart] = useState(toLocalInput(base.start));
   const [end, setEnd] = useState(base.end == null ? toLocalInput(t) : toLocalInput(base.end));
   const [running, setRunning] = useState(base.end == null && !!existing);
   const [note, setNote] = useState(base.note || '');
 
-  const s = fromLocalInput(start);
-  const e = running ? null : fromLocalInput(end);
+  const origStart = toLocalInput(base.start);
+  const origEnd = base.end == null ? null : toLocalInput(base.end);
+  const s = existing && start === origStart ? existing.start : fromLocalInput(start);
+  const e = running ? null : (existing && origEnd != null && end === origEnd ? existing.end : fromLocalInput(end));
   let error = '';
-  if (!start || (!running && !end)) error = 'Completa las fechas.';
+  if (!start || (!running && !end) || !Number.isFinite(s) || (e != null && !Number.isFinite(e))) error = 'Completa las fechas.';
   else if (e != null && e <= s) error = 'El fin debe ser posterior al inicio.';
   else if (e != null && e > t) error = 'El fin no puede estar en el futuro.';
   else if (s > t) error = 'El inicio no puede estar en el futuro.';
@@ -164,7 +167,7 @@ export function ImportDialog({ parsed }) {
           ? <p>Incluye Dinero: {parsed.fin.movs.length} movimientos.</p>
           : <p class="msg warn">Incluye datos de Dinero, pero solo se pueden importar con el bloqueo activado. Se importará solo el tiempo.</p>)}
         <p>Actualmente tienes {st.sessions.length} sesiones. Podrás deshacer justo después.</p>
-        <button class="btn primary" onClick={() => go('merge')} disabled={!n && !(parsed.fin && hasFinData(parsed.fin))}>Combinar (agrega lo que falta)</button>
+        <button class="btn primary" onClick={() => go('merge')} disabled={!n && !(parsed.fin && hasFinData(parsed.fin) && st.lock?.v === 2)}>Combinar (agrega lo que falta)</button>
         <button class="btn danger-outline" style={{ marginTop: 0 }} onClick={() => go('replace')}>Reemplazar todo</button>
         <button class="btn ghost" onClick={close}>Cancelar</button>
       </div>
@@ -191,7 +194,7 @@ export function ExportSheet() {
     setBusy(false);
   };
   // Compartir debe ocurrir directamente en el toque (iOS): por eso el archivo se prepara antes.
-  const share = async (f) => { await shareBackup(f); close(); };
+  const share = async (f) => { if (await shareBackup(f)) close(); };
   return (
     <div class="sheet-wrap" onClick={close}>
       <form class="sheet" onClick={(ev) => ev.stopPropagation()} onSubmit={prepare}>
@@ -235,7 +238,7 @@ export function ImportPasswordDialog({ encrypted }) {
     setBusy(true);
     setErr('');
     let text;
-    try { text = await decryptBackup(encrypted, pw); } catch { setBusy(false); return setErr('Contraseña incorrecta.'); }
+    try { text = await decryptBackup(encrypted, pw); } catch (err) { setBusy(false); return setErr(err instanceof BackupFormatError ? err.message : 'Contraseña incorrecta.'); }
     const parsed = parseBackup(text);
     setBusy(false);
     if (parsed.error) return setErr(parsed.error);

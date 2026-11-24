@@ -1,19 +1,17 @@
 // Pestaña Dinero: resumen del mes, movimientos, ahorro, pendientes por revisar y configuración.
 import { useRef } from 'preact/hooks';
 import { Icon } from '../components/Icon.jsx';
-import { AuthGate, HIDE, PrivacyButton, requestSettingsAuth, settingsNeedAuth } from '../components/Privacy.jsx';
+import { AuthGate, HIDE, PrivacyButton, openProtectedSheet, requestSettingsAuth, settingsNeedAuth } from '../components/Privacy.jsx';
 import { set, setFin, toast, useStore } from '../store.js';
-import { acctName, finCat, fmtMoney, fmtSigned, TYPES } from '../fin/model.js';
+import { acctName, finCat, fmtMoney, fmtSigned, prettyDesc, titleCase, TYPES } from '../fin/model.js';
 import { classified } from '../fin/classify.js';
 import { SAV_ACCOUNTS, currentPeriod, latestPeriod, periodLabel, periodOf, periodStats, reviewList, savingsAt, savingsPeriods, savingsRow, savingsStats, shiftPeriod, trendBars, yieldsAt } from '../fin/stats.js';
 import { readStatements } from '../fin/flow.js';
 import { applyCorrection } from '../fin/actions.js';
+import { pauseAutoLock, resumeAutoLock } from '../lock.js';
 import { FinConfig } from './FinConfig.jsx';
 
-
-// Palabras TODO EN MAYÚSCULAS → inicial mayúscula ("Para JUAN PEREZ" → "Para Juan Perez").
-const titleCase = (s) => s.replace(/[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ0-9._*/-]+/g, (w) => w[0] + w.slice(1).toLowerCase());
-export const prettyDesc = (m) => titleCase(m.desc);
+export { prettyDesc };
 const fmtDate = (d) => {
   const [y, mo, da] = d.split('-').map(Number);
   return new Intl.DateTimeFormat('es-CO', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).format(Date.UTC(y, mo - 1, da));
@@ -32,12 +30,12 @@ function Gate() {
   );
 }
 
-function PeriodNav({ k, setK, f }) {
-  const cur = currentPeriod(f);
+function PeriodNav({ k, setK, f, max }) {
+  const cur = max || currentPeriod(f);
   return (
     <div class="weeknav">
       <button class="round sm" onClick={() => setK(shiftPeriod(k, -1))} aria-label="Mes anterior"><Icon name="left" size={18} /></button>
-      <div class="weeknav-mid"><b>{periodLabel(k, f.monthStart)}</b><span>{k === cur ? 'mes en curso' : ''}</span></div>
+      <div class="weeknav-mid"><b>{periodLabel(k, f.monthStart)}</b><span>{!max && k === cur ? 'mes en curso' : ''}</span></div>
       <button class="round sm" disabled={k >= cur} onClick={() => setK(shiftPeriod(k, 1))} aria-label="Mes siguiente"><Icon name="right" size={18} /></button>
     </div>
   );
@@ -161,7 +159,7 @@ export function MovRow({ f, m, c }) {
   const label = cat ? cat.name : TYPES[c.type];
   const dim = c.type === 'propia' || c.type === 'anulado';
   return (
-    <button class={`mov ${dim ? 'dim' : ''}`} style={{ '--c': color }} onClick={() => set({ sheet: { type: 'mov', id: m.id } })}>
+    <button class={`mov ${dim ? 'dim' : ''}`} style={{ '--c': color }} onClick={() => openProtectedSheet({ type: 'mov', id: m.id }, 'Detalle del movimiento')}>
       <span class="ico"><Icon name={icon} size={18} /></span>
       <span class="mov-main">
         <b>{prettyDesc(m)}</b>
@@ -217,8 +215,8 @@ function Savings({ f, k, setK }) {
   const st = useStore();
   const periods = savingsPeriods(f);
   if (!periods.length) return <div class="empty"><Icon name="wallet" size={30} /><span>Importa un extracto para ver tus saldos.</span></div>;
-  // Mes que se muestra: el elegido, o el último con extracto si el elegido es anterior a todos
-  const sk = k < periods[0] ? periods.at(-1) : k;
+  // Mes que se muestra: el elegido, o el último con extracto si está fuera del rango con extractos
+  const sk = k < periods[0] || k > periods.at(-1) ? periods.at(-1) : k;
   const at = savingsAt(f, sk);
   const prev = savingsAt(f, shiftPeriod(sk, -1));
   const focus = st.finAcct || null;
@@ -236,7 +234,7 @@ function Savings({ f, k, setK }) {
 
   return (
     <>
-      <PeriodNav k={sk} setK={setK} f={f} />
+      <PeriodNav k={sk} setK={setK} f={{ ...f, monthStart: 1 }} max={periods.at(-1)} />
       <section class="hero">
         <div class="hero-num money">{fmtMoney(at.total, hide)}</div>
         <div class="hero-sub">
@@ -306,7 +304,7 @@ function Savings({ f, k, setK }) {
       {stats.yieldBy.length > 0 && (
         <>
           <h3 class="sec">Rendimientos por bolsillo</h3>
-          <section class="panel tight">
+          <section class="panel tight sav-yield">
             {stats.yieldBy.map(([n, v]) => <div class="row-stat" key={n}><span>{n}</span><b>{fmtMoney(v, hide)}</b></div>)}
             <div class="row-stat total"><span>Total</span><b>{fmtMoney(stats.yield, hide)}</b></div>
           </section>
@@ -364,7 +362,7 @@ function Review({ f }) {
         return (
           <section class="panel rev" key={m.id}>
             <div class="rev-top">
-              <button class="btn-reset rev-main" onClick={() => set({ sheet: { type: 'mov', id: m.id } })}>
+              <button class="btn-reset rev-main" onClick={() => openProtectedSheet({ type: 'mov', id: m.id }, 'Detalle del movimiento')}>
                 <b>{prettyDesc(m)}</b><small>{fmtDate(m.date)} · {acctName(m.acct)} · {c.why}</small>
               </button>
               <span class={`mov-amt ${m.amount > 0 ? 'pos' : ''}`}>{fmtSigned(m.amount, HIDE())}</span>
@@ -407,9 +405,14 @@ export function Money() {
 
   const pending = reviewList(f).length;
   const onFiles = async (e) => {
+    resumeAutoLock();
     const files = [...(e.currentTarget.files || [])];
     e.currentTarget.value = '';
     if (files.length) await readStatements(files);
+  };
+  const onImport = () => {
+    if (settingsNeedAuth(st)) openProtectedSheet({ type: 'pickstmt' }, 'Importar extractos');
+    else { pauseAutoLock(); fileRef.current.click(); }
   };
   const VIEWS = [['resumen', 'Resumen'], ['movs', 'Movimientos'], ['ahorro', 'Ahorro'], ['revisar', pending ? `Revisar · ${pending}` : 'Revisar']];
 
@@ -424,8 +427,8 @@ export function Money() {
       </header>
 
       <div class="btn-grid">
-        <button class="btn primary" onClick={() => fileRef.current.click()}><Icon name="file" size={18} /> Importar extracto</button>
-        <button class="btn ghost" onClick={() => set({ sheet: { type: 'mov', id: null } })}><Icon name="plus" size={18} /> Registrar</button>
+        <button class="btn primary" onClick={onImport}><Icon name="file" size={18} /> Importar extracto</button>
+        <button class="btn ghost" onClick={() => openProtectedSheet({ type: 'mov', id: null }, 'Registrar movimiento')}><Icon name="plus" size={18} /> Registrar</button>
       </div>
       <input ref={fileRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={onFiles} />
 

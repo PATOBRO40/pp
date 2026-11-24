@@ -6,6 +6,7 @@ import * as V from './vault.js';
 import { beep } from './audio.js';
 import { fmtDur } from './time.js';
 import { catById, defaults, liveCats, migrateSettings } from './model.js';
+import { clearClassifiedCache } from './fin/classify.js';
 import { defaultFin, migrateFin } from './fin/model.js';
 
 export const now = () => Date.now();
@@ -36,6 +37,8 @@ const VARIANTS = ['aurora', 'neon', 'editorial'];
 const THEMES = ['auto', 'dark', 'light'];
 let lastSettings = JSON.stringify(pick(state));
 let settingsTimer = null;
+let settingsDirty = false;
+let finDirty = false;
 let queue = Promise.resolve();
 
 export const getState = () => state;
@@ -81,8 +84,19 @@ function apply(patch) {
   subs.forEach((f) => f());
 }
 
+/** Fuerza el guardado inmediato si hay cambios de ajustes o Dinero pendientes. */
+export function flushPending() {
+  if (!state.ready || (sealed() && !V.isOpen())) return;
+  if (settingsTimer == null && !settingsDirty && !finDirty) return;
+  clearTimeout(settingsTimer);
+  settingsTimer = null;
+  settingsDirty = false;
+  finDirty = false;
+  persist(() => (sealed() ? writeVault() : db.setKV('settings', pick(state))));
+}
+
 /** Actualiza el estado y persiste lo que haya cambiado. */
-export function set(patch) {
+export function set(patch, opts) {
   const prev = state;
   const p = typeof patch === 'function' ? patch(prev) : patch;
   apply(p);
@@ -93,18 +107,31 @@ export function set(patch) {
   if (state.sessions !== prev.sessions) syncSessions(prev.sessions, state.sessions);
   const finChanged = state.fin !== prev.fin && sealed();
   const cur = JSON.stringify(pick(state));
-  if (cur !== lastSettings || finChanged) {
+  const settingsChanged = cur !== lastSettings;
+  if (settingsChanged || finChanged) {
     lastSettings = cur;
+    if (settingsChanged) settingsDirty = true;
+    if (finChanged) finDirty = true;
     clearTimeout(settingsTimer);
-    settingsTimer = setTimeout(() => {
+    if (opts?.immediate) {
+      settingsTimer = null;
+      settingsDirty = false;
+      finDirty = false;
       persist(() => (sealed() ? writeVault() : db.setKV('settings', pick(state))));
-    }, 250);
+    } else {
+      settingsTimer = setTimeout(() => {
+        settingsTimer = null;
+        settingsDirty = false;
+        finDirty = false;
+        persist(() => (sealed() ? writeVault() : db.setKV('settings', pick(state))));
+      }, 250);
+    }
   }
 }
 
-/** Cambia los datos de Dinero: setFin((f) => ({ ...f, ... })). */
-export function setFin(fn) {
-  set((s) => ({ fin: typeof fn === 'function' ? fn(s.fin) : { ...s.fin, ...fn } }));
+/** Cambia los datos de Dinero: setFin((f) => ({ ...f, ... }), opts). */
+export function setFin(fn, opts) {
+  set((s) => ({ fin: typeof fn === 'function' ? fn(s.fin) : { ...s.fin, ...fn } }), opts);
 }
 
 export function setMeta(patch) {
@@ -139,6 +166,7 @@ export function enableVault(lock, master) {
 /** Descifra los datos guardados con la clave maestra y muestra la app. */
 export function openVault(master) {
   return serial(async () => {
+    clearClassifiedCache();
     await V.open(master);
     let data;
     try {
@@ -148,8 +176,22 @@ export function openVault(master) {
       V.close();
       throw e;
     }
+    clearTimeout(settingsTimer);
+    settingsTimer = null;
+    settingsDirty = false;
+    finDirty = false;
     const settings = migrateSettings(data.settings);
-    apply({ ...freshDefaults(), ...(settings || {}), sessions: data.sessions || [], fin: migrateFin(data.fin), locked: false });
+    apply({
+      ...freshDefaults(),
+      ...(settings || {}),
+      sessions: data.sessions || [],
+      fin: migrateFin(data.fin),
+      locked: false,
+      settingsAuth: false,
+      finCfgAuth: false,
+      sheet: null,
+      toast: null,
+    });
     lastSettings = JSON.stringify(pick(state));
     if (settings !== data.settings) persist(writeVault);
   });
@@ -160,30 +202,57 @@ export function lockApp() {
   if (state.locked) return;
   apply({ locked: true, sheet: null, toast: null, settingsAuth: false, finCfgAuth: false });
   if (!sealed() || !V.isOpen()) return;
-  clearTimeout(settingsTimer);
-  persist(writeVault);
+  if (settingsTimer != null || settingsDirty || finDirty) {
+    clearTimeout(settingsTimer);
+    settingsTimer = null;
+    settingsDirty = false;
+    finDirty = false;
+    persist(writeVault);
+  }
   serial(() => {
     V.close();
-    apply({ ...freshDefaults(), theme: state.theme, variant: state.variant, sessions: [], fin: defaultFin(), dismissedForgot: null });
+    clearClassifiedCache();
+    apply({
+      ...freshDefaults(),
+      theme: state.theme,
+      variant: state.variant,
+      sessions: [],
+      fin: defaultFin(),
+      dismissedForgot: null,
+      finFilter: 'all',
+      finKey: null,
+      finAcct: null,
+      finView: 'resumen',
+    });
   });
 }
 
 /** Quita el bloqueo: vuelve a guardar todo en claro y borra lo cifrado, en una transacción. */
 export function disableVault() {
+  clearTimeout(settingsTimer);
+  settingsTimer = null;
+  settingsDirty = false;
+  finDirty = false;
   return serial(async () => {
     await db.commit({ clearSessions: true, putSessions: state.sessions, kv: { settings: pick(state), vault: null, lock: null } });
     V.close();
-    apply({ lock: null, locked: false });
+    clearClassifiedCache();
+    apply({ lock: null, locked: false, fin: defaultFin(), settingsAuth: false, finCfgAuth: false });
   });
 }
 
 /** Contraseña olvidada: borra sesiones (y, si estaban cifrados, también los ajustes) y quita el bloqueo. */
 export function wipeData() {
+  clearTimeout(settingsTimer);
+  settingsTimer = null;
+  settingsDirty = false;
+  finDirty = false;
   return serial(async () => {
     const settings = sealed() ? { ...freshDefaults(), theme: state.theme, variant: state.variant } : pick(state);
     await db.commit({ clearSessions: true, kv: { settings, vault: null, lock: null } });
     V.close();
-    apply({ ...settings, sessions: [], fin: defaultFin(), lock: null, locked: false, sheet: null, dismissedForgot: null });
+    clearClassifiedCache();
+    apply({ ...settings, sessions: [], fin: defaultFin(), lock: null, locked: false, sheet: null, dismissedForgot: null, settingsAuth: false, finCfgAuth: false });
     lastSettings = JSON.stringify(pick(state));
   });
 }
@@ -298,9 +367,23 @@ export function saveSession(s) {
 }
 
 export function deleteSession(id) {
-  const prev = state.sessions;
-  set({ sessions: prev.filter((x) => x.id !== id) });
-  toast('Sesión eliminada', { action: { label: 'Deshacer', fn: () => set({ sessions: prev }) } });
+  const removed = state.sessions.find((x) => x.id === id);
+  if (!removed) return;
+  set({ sessions: state.sessions.filter((x) => x.id !== id) });
+  toast('Sesión eliminada', {
+    action: {
+      label: 'Deshacer',
+      fn: () => {
+        const cur = getState().sessions;
+        if (cur.some((x) => x.id === removed.id)) return;
+        let list = cur;
+        if (removed.end == null && cur.some((x) => x.end == null)) {
+          list = cur.map((x) => (x.end == null ? { ...x, end: Math.max(x.start, now()) } : x));
+        }
+        set({ sessions: [...list, removed].sort((a, b) => a.start - b.start) });
+      },
+    },
+  });
 }
 
 /**
@@ -312,20 +395,45 @@ export function resetTime(catId, from) {
   const t = now();
   const prev = state.sessions;
   const next = [];
+  const affected = [];
+  const createdIds = new Set();
   for (const s of prev) {
     const hit = (catId === 'all' || s.cat === catId) && (s.end ?? t) > from;
     if (!hit) { next.push(s); continue; }
-    if (s.start < from) next.push({ ...s, end: from });
-    if (s.end == null) next.push(s.start < from ? { ...s, id: newId(), start: t } : { ...s, start: t });
+    affected.push(s);
+    if (s.start < from) {
+      const trimmed = { ...s, end: from };
+      next.push(trimmed);
+      createdIds.add(trimmed.id);
+    }
+    if (s.end == null) {
+      const restarted = s.start < from ? { ...s, id: newId(), start: t } : { ...s, start: t };
+      next.push(restarted);
+      createdIds.add(restarted.id);
+    }
   }
   set({ sessions: next.sort((a, b) => a.start - b.start), dismissedForgot: null });
-  toast('Tiempo reiniciado', { kind: 'ok', action: { label: 'Deshacer', fn: () => set({ sessions: prev }) } });
+  toast('Tiempo reiniciado', {
+    kind: 'ok',
+    action: {
+      label: 'Deshacer',
+      fn: () => {
+        const cur = getState().sessions.filter((x) => !createdIds.has(x.id));
+        const have = new Set(cur.map((x) => x.id));
+        const hasActiveNew = cur.some((x) => x.end == null);
+        const restore = affected
+          .filter((x) => !have.has(x.id))
+          .map((x) => (hasActiveNew && x.end == null ? { ...x, end: Math.max(x.start, now()) } : x));
+        set({ sessions: [...cur, ...restore].sort((a, b) => a.start - b.start) });
+      },
+    },
+  });
 }
 
 /** Restablece ajustes y categorías por defecto, conservando las categorías propias (tienen historial). */
 export function resetSettings() {
   const extra = state.cats.filter((c) => !defaults.cats.some((d) => d.id === c.id));
-  set({ ...pick(defaults), cats: [...defaults.cats.map((c) => ({ ...c })), ...extra], groups: defaults.groups.map((g) => ({ ...g })) });
+  set({ ...pick(defaults), cats: [...defaults.cats.map((c) => ({ ...c })), ...extra], groups: defaults.groups.map((g) => ({ ...g, cats: [...g.cats] })) });
 }
 
 // ---------- Categorías y topes ----------
@@ -345,8 +453,11 @@ export function addCategory() {
 export function moveCategory(id, dir) {
   const cats = [...state.cats];
   const i = cats.findIndex((c) => c.id === id);
-  const j = i + dir;
-  if (i < 0 || j < 0 || j >= cats.length) return;
+  if (i < 0) return;
+  const arch = !!cats[i].archived;
+  let j = i + dir;
+  while (j >= 0 && j < cats.length && !!cats[j].archived !== arch) j += dir;
+  if (j < 0 || j >= cats.length) return;
   [cats[i], cats[j]] = [cats[j], cats[i]];
   set({ cats });
 }
@@ -368,13 +479,34 @@ export function deleteCategory(id) {
     toast('Debe quedar al menos una categoría activa', { kind: 'warn' });
     return false;
   }
-  const prev = { cats: state.cats, groups: state.groups, sessions: state.sessions };
+  const catIdx = state.cats.findIndex((c) => c.id === id);
+  const removedCat = state.cats[catIdx];
+  if (!removedCat) return false;
+  const removedSessions = state.sessions.filter((s) => s.cat === id);
+  const groupIds = state.groups.filter((g) => g.cats.includes(id)).map((g) => g.id);
   set({
     cats: state.cats.filter((c) => c.id !== id),
     groups: state.groups.map((g) => ({ ...g, cats: g.cats.filter((x) => x !== id) })),
     sessions: state.sessions.filter((s) => s.cat !== id),
   });
-  toast('Categoría eliminada', { action: { label: 'Deshacer', fn: () => set(prev) } });
+  toast('Categoría eliminada', {
+    action: {
+      label: 'Deshacer',
+      fn: () => {
+        const cur = getState();
+        const cats = cur.cats.some((c) => c.id === id)
+          ? cur.cats
+          : [...cur.cats.slice(0, catIdx), removedCat, ...cur.cats.slice(catIdx)];
+        const groups = cur.groups.map((g) => (groupIds.includes(g.id) && !g.cats.includes(id) ? { ...g, cats: [...g.cats, id] } : g));
+        const have = new Set(cur.sessions.map((s) => s.id));
+        const hasActive = cur.sessions.some((s) => s.end == null);
+        const restoreSess = removedSessions
+          .filter((s) => !have.has(s.id))
+          .map((s) => (hasActive && s.end == null ? { ...s, end: Math.max(s.start, now()) } : s));
+        set({ cats, groups, sessions: [...cur.sessions, ...restoreSess].sort((a, b) => a.start - b.start) });
+      },
+    },
+  });
   return true;
 }
 
@@ -389,7 +521,18 @@ export function addGroup() {
 }
 
 export function deleteGroup(id) {
-  const prev = state.groups;
-  set({ groups: prev.filter((g) => g.id !== id) });
-  toast('Tope eliminado', { action: { label: 'Deshacer', fn: () => set({ groups: prev }) } });
+  const idx = state.groups.findIndex((g) => g.id === id);
+  const removed = state.groups[idx];
+  if (!removed) return;
+  set({ groups: state.groups.filter((g) => g.id !== id) });
+  toast('Tope eliminado', {
+    action: {
+      label: 'Deshacer',
+      fn: () => {
+        const cur = getState().groups;
+        if (cur.some((g) => g.id === id)) return;
+        set({ groups: [...cur.slice(0, idx), removed, ...cur.slice(idx)] });
+      },
+    },
+  });
 }

@@ -73,7 +73,7 @@ export function rangeTotals(sessions, from, to, now) {
 // ---------- Formato (es-CO) ----------
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const pad = (n) => String(n).padStart(2, '0');
-const timeFmt = new Intl.DateTimeFormat('es-CO', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+const timeFmt = new Intl.DateTimeFormat('es-CO', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 const longFmt = new Intl.DateTimeFormat('es-CO', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long' });
 const shortFmt = new Intl.DateTimeFormat('es-CO', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short' });
 const dmFmt = new Intl.DateTimeFormat('es-CO', { timeZone: TZ, day: 'numeric', month: 'short' });
@@ -110,9 +110,9 @@ export function toLocalInput(ms) {
 }
 
 export function fromLocalInput(str) {
-  const [d, t] = str.split('T');
-  const [y, m, dd] = d.split('-').map(Number);
-  const [h, mi] = t.split(':').map(Number);
-  const utc = Date.UTC(y, m - 1, dd, h, mi);
+  if (!str || typeof str !== 'string') return NaN;
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return NaN;
+  const utc = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
   return utc - tzOffset(utc);
 }

@@ -18,7 +18,6 @@ export function defaultFin() {
     v: FIN_VERSION,
     owner: '',          // tu nombre según los extractos (para reconocer tus transferencias)
     monthStart: 1,      // día en que empieza tu mes
-    hide: false,        // ocultar montos
     cats: [
       { id: 'transp', name: 'Transporte', color: 3, icon: 'bus' },
       { id: 'cmin', name: 'Consumo básico mínimo', color: 2, icon: 'cup' },
@@ -73,9 +72,29 @@ export function migrateFin(f) {
   return out;
 }
 
-export const hasFinData = (f) => !!f && (f.movs.length > 0 || f.stmts.length > 0 || f.incomes.length > 0);
+export const hasFinData = (f) => !!f && (
+  f.movs.length > 0 || f.stmts.length > 0 || f.incomes.length > 0 ||
+  Object.keys(f.memo || {}).length > 0 || !!(f.owner && f.owner.trim())
+);
 export const finCat = (f, id) => f.cats.find((c) => c.id === id) || f.cats.find((c) => c.id === 'rest') || f.cats[0];
 export const acctName = (id) => ACCOUNTS.find((a) => a.id === id)?.name || id;
+
+// Palabras TODO EN MAYÚSCULAS → inicial mayúscula ("Para JUAN PEREZ" → "Para Juan Perez").
+export const titleCase = (s) => String(s || '').replace(/[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ0-9._*/-]+/g, (w) => w[0] + w.slice(1).toLowerCase());
+export const prettyDesc = (m) => titleCase(m.desc);
+
+/** Convierte texto de pesos colombianos ("15.000", "15,000", "1500,50") a entero de pesos. */
+export function parsePesos(raw) {
+  let s = String(raw || '').trim().replace(/[^\d.,]/g, '');
+  if (!s) return 0;
+  if (/^\d{1,3}([.,]\d{3})+$/.test(s)) s = s.replace(/[.,]/g, '');
+  else {
+    const m = s.match(/^([\d.,]+)[.,](\d{1,2})$/);
+    if (m) s = m[1].replace(/[.,]/g, '') + '.' + m[2];
+    else s = s.replace(/[.,]/g, '');
+  }
+  return Math.max(0, Math.round(parseFloat(s) || 0));
+}
 
 const MONEY = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
 /** Centavos → "$ 12.345". Con hide, oculta el valor. */

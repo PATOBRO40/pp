@@ -1,6 +1,6 @@
 // Modo de privacidad global: ocultar cifras, u ocultar también nombres e íconos.
 // Se guarda en los ajustes y sigue activo hasta que lo desactives. No aplica en Ajustes.
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { Icon } from './Icon.jsx';
 import { checkPassword, confirmBiometric, hasBiometric } from '../lock.js';
 import { getState, set, useStore } from '../store.js';
@@ -14,21 +14,93 @@ export const PRIVACY = [
 /** ¿Hay que ocultar montos? (Dinero los formatea como $ ••••) */
 export const HIDE = () => getState().privacy === 'data' || getState().privacy === 'all';
 
-// ---------- Ajustes protegidos ----------
-// Con un modo de ocultar activo (y bloqueo configurado), entrar a Ajustes o a Dinero → Configurar
-// exige Face ID o contraseña. La autorización dura hasta salir de esa pantalla.
+// ---------- Ajustes y hojas protegidas ----------
+// Con un modo de ocultar activo (y bloqueo configurado), entrar a Ajustes, Dinero → Configurar
+// o cualquier hoja sensible exige Face ID o contraseña. La autorización en hojas no se guarda.
 
-/** ¿Hay que verificar para entrar a los ajustes? */
+let authReq = 0;
+
+/** ¿Hay que verificar para entrar a los ajustes o abrir hojas sensibles? */
 export const settingsNeedAuth = (s = getState()) => (s.privacy === 'data' || s.privacy === 'all') && s.lock?.v === 2;
 
 /**
  * Llamar directamente en el toque que abre la pantalla protegida: así Face ID puede pedirse
- * enseguida (Safari exige un gesto). flag: 'settingsAuth' | 'finCfgAuth'.
+ * enseida (Safari exige un gesto). flag: 'settingsAuth' | 'finCfgAuth'.
  */
 export function requestSettingsAuth(flag) {
   const s = getState();
   if (!settingsNeedAuth(s) || s[flag]) return;
-  if (hasBiometric(s.lock)) confirmBiometric().then(() => set({ [flag]: true })).catch(() => {});
+  const req = ++authReq;
+  if (hasBiometric(s.lock)) {
+    confirmBiometric().then(() => {
+      const cur = getState();
+      const onScreen = flag === 'settingsAuth' ? cur.tab === 'settings' : cur.tab === 'money' && cur.finView === 'config';
+      if (!cur.locked && req === authReq && onScreen) set({ [flag]: true });
+    }).catch(() => {});
+  }
+}
+
+/**
+ * Abre una hoja sensible. Si hay privacidad activa con bloqueo, pide Face ID (en el mismo toque)
+ * o contraseña antes de abrirla, sin dejar autorización persistente.
+ */
+export function openProtectedSheet(target, title) {
+  const s = getState();
+  if (!settingsNeedAuth(s)) {
+    set({ sheet: target });
+    return;
+  }
+  const req = ++authReq;
+  set({ sheet: { type: 'sheetauth', target, title, req } });
+  if (hasBiometric(s.lock)) {
+    confirmBiometric().then(() => {
+      const cur = getState();
+      if (!cur.locked && cur.sheet?.type === 'sheetauth' && cur.sheet.req === req) set({ sheet: target });
+    }).catch(() => {});
+  }
+}
+
+/** Diálogo para confirmar identidad antes de abrir una hoja sensible. */
+export function SheetAuthDialog({ target, title }) {
+  const st = useStore();
+  const [pw, setPw] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const bio = hasBiometric(st.lock);
+  const close = () => { ++authReq; set({ sheet: null }); };
+  const unlock = () => set({ sheet: target });
+  const tryBio = async () => {
+    setErr('');
+    try { await confirmBiometric(); unlock(); } catch { setErr('No se pudo verificar con Face ID. Usa tu contraseña.'); }
+  };
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!pw || busy) return;
+    setBusy(true);
+    const good = await checkPassword(pw);
+    setBusy(false);
+    setPw('');
+    if (good) unlock();
+    else setErr(Date.now() < (getState().lock?.until || 0) ? 'Demasiados intentos. Espera un momento.' : 'Contraseña incorrecta.');
+  };
+  return (
+    <div class="sheet-wrap center" onClick={close}>
+      <div class="dialog" onClick={(e) => e.stopPropagation()}>
+        <h2>{title}</h2>
+        <p>Tienes activo un modo de ocultar. Confirma que eres tú para continuar.</p>
+        {bio && <button type="button" class="btn primary" onClick={tryBio}><Icon name="face" size={20} /> Usar Face ID</button>}
+        <form class="stack-form" onSubmit={submit}>
+          <input type="password" placeholder="Contraseña" aria-label="Contraseña" autocomplete="current-password"
+            value={pw} onInput={(e) => setPw(e.currentTarget.value)} />
+          {err && <p class="msg err">{err}</p>}
+          <div class="sheet-actions">
+            <button type="button" class="btn ghost" onClick={close}>Cancelar</button>
+            <button class="btn primary" type="submit" disabled={!pw || busy}>{busy ? 'Verificando…' : 'Entrar'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 }
 
 /** Pantalla que reemplaza a los ajustes hasta verificar la identidad. */
@@ -37,17 +109,20 @@ export function AuthGate({ flag, title }) {
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
   const bio = hasBiometric(st.lock);
-  const ok = () => set({ [flag]: true });
+  const ok = () => { if (alive.current && !getState().locked) set({ [flag]: true }); };
   const tryBio = async () => {
     setErr('');
-    try { await confirmBiometric(); ok(); } catch { setErr('No se pudo verificar con Face ID. Usa tu contraseña.'); }
+    try { await confirmBiometric(); ok(); } catch { if (alive.current) setErr('No se pudo verificar con Face ID. Usa tu contraseña.'); }
   };
   const submit = async (e) => {
     e.preventDefault();
     if (!pw || busy) return;
     setBusy(true);
     const good = await checkPassword(pw);
+    if (!alive.current) return;
     setBusy(false);
     setPw('');
     if (good) ok();
@@ -94,18 +169,20 @@ export function PrivacyChoice() {
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const pickReq = useRef(0);
   const locked = st.lock?.v === 2;
   const bio = hasBiometric(st.lock);
   // Quien acaba de confirmar su identidad puede seguir en la pantalla donde está (p. ej. Ajustes)
-  const apply = (v) => { set({ privacy: v, settingsAuth: true, finCfgAuth: true }); setPending(null); setPw(''); setErr(''); };
+  const apply = (v) => { ++pickReq.current; set({ privacy: v, settingsAuth: true, finCfgAuth: true }); setPending(null); setPw(''); setErr(''); };
 
   const tryBio = async (v) => {
+    const req = ++pickReq.current;
     setErr('');
     try {
       await confirmBiometric();
-      apply(v);
+      if (req === pickReq.current && !getState().locked) apply(v);
     } catch {
-      setErr('No se pudo verificar con Face ID. Usa tu contraseña.');
+      if (req === pickReq.current) setErr('No se pudo verificar con Face ID. Usa tu contraseña.');
     }
   };
   // El toque en la opción cuenta como gesto: Face ID se puede pedir de inmediato
@@ -117,6 +194,7 @@ export function PrivacyChoice() {
     setErr('');
     if (bio) tryBio(v);
   };
+  const cancel = () => { ++pickReq.current; setPending(null); setPw(''); setErr(''); };
   const submit = async (e) => {
     e.preventDefault();
     if (!pw || busy) return;
@@ -147,7 +225,7 @@ export function PrivacyChoice() {
             value={pw} onInput={(e) => setPw(e.currentTarget.value)} />
           {err && <p class="msg err">{err}</p>}
           <div class="sheet-actions">
-            <button type="button" class="btn ghost" onClick={() => { setPending(null); setErr(''); }}>Cancelar</button>
+            <button type="button" class="btn ghost" onClick={cancel}>Cancelar</button>
             <button type="submit" class="btn primary" disabled={!pw || busy}>{busy ? 'Verificando…' : 'Confirmar'}</button>
           </div>
         </form>

@@ -7,7 +7,7 @@ import { fmtDM, fmtDur } from '../time.js';
 import { addCategory, addGroup, resetSettings, set, setArchived, toast, updateCategory, updateGroup, useStore } from '../store.js';
 import { parseBackup } from '../backup.js';
 import { checkUpdate, isStandalone } from '../pwa.js';
-import { biometricAvailable, enrollBiometric, hasBiometric, removeBiometric, setGrace } from '../lock.js';
+import { NeedSecondTapError, biometricAvailable, enrollBiometric, finishBiometricEnrollment, hasBiometric, pauseAutoLock, removeBiometric, resumeAutoLock, setGrace } from '../lock.js';
 import { bioError } from '../components/Lock.jsx';
 
 const VARIANTS = [['aurora', 'Aurora'], ['neon', 'Neón'], ['editorial', 'Editorial']];
@@ -25,6 +25,7 @@ export function Settings() {
   const catSummary = (c) => [c.cap != null ? `Tope ${c.cap} h` : 'Sin tope propio', ...st.groups.filter((g) => g.cats.includes(c.id)).map((g) => g.name)].join(' · ');
 
   const onFile = async (e) => {
+    resumeAutoLock();
     const f = e.currentTarget.files?.[0];
     e.currentTarget.value = '';
     if (!f) return;
@@ -39,6 +40,24 @@ export function Settings() {
       if (on) { await enrollBiometric(); toast('Face ID activado', { kind: 'ok' }); }
       else { await removeBiometric(); toast('Face ID desactivado'); }
     } catch (e) {
+      if (e instanceof NeedSecondTapError) {
+        toast('Toca Confirmar para terminar de activar Face ID', {
+          kind: 'info',
+          long: true,
+          action: {
+            label: 'Confirmar',
+            fn: async () => {
+              try {
+                await finishBiometricEnrollment(e.credId, e.salt);
+                toast('Face ID activado', { kind: 'ok' });
+              } catch (e2) {
+                toast(bioError(e2), { kind: 'warn', long: true });
+              }
+            },
+          },
+        });
+        return;
+      }
       toast(bioError(e), { kind: 'warn', long: true });
     }
   };
@@ -56,7 +75,7 @@ export function Settings() {
               <span>{g.name} <Icon name="right" size={13} /></span>
               <small>{g.cats.map((id) => catById(st, id).short).join(' + ') || 'Sin categorías'}</small>
             </button>
-            <Stepper value={g.hours} step={0.5} unit="h" onChange={(v) => updateGroup(g.id, { hours: v })} />
+            <Stepper value={g.hours} step={0.5} min={0.5} unit="h" onChange={(v) => updateGroup(g.id, { hours: v })} />
           </div>
         ))}
         <button class="btn ghost wide" onClick={() => openGroup(addGroup())}><Icon name="plus" size={18} /> Añadir tope compartido</button>
@@ -69,7 +88,7 @@ export function Settings() {
             <button class="set-label tap" onClick={() => openCat(c.id)}>
               <span><i class="dot" style={{ background: `var(--p${c.color})` }} /> {c.name}</span>
             </button>
-            <Stepper value={c.cap} step={0.5} unit="h" onChange={(v) => updateCategory(c.id, { cap: v })} />
+            <Stepper value={c.cap} step={0.5} min={0.5} unit="h" onChange={(v) => updateCategory(c.id, { cap: v })} />
           </div>
         ))}
         <Row label="Avisar desde" hint="Ámbar a este porcentaje y rojo al superar cualquier tope">
@@ -165,7 +184,7 @@ export function Settings() {
         </p>
         <div class="btn-grid">
           <button class="btn ghost" onClick={() => set({ sheet: { type: 'export' } })}><Icon name="up" size={18} /> Exportar</button>
-          <button class="btn ghost" onClick={() => fileRef.current.click()}><Icon name="down" size={18} /> Importar</button>
+          <button class="btn ghost" onClick={() => { pauseAutoLock(); fileRef.current.click(); }}><Icon name="down" size={18} /> Importar</button>
         </div>
         <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={onFile} />
         <button class="btn ghost wide" onClick={() => set({ sheet: { type: 'reset' } })}><Icon name="reset" size={18} /> Reiniciar tiempo</button>

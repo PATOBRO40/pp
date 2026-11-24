@@ -94,9 +94,10 @@ function WeekView({ off, setOff }) {
   const ws = startOfWeek(t) + off * 7 * DAY;
   const w = weekStats(st.sessions, ws, t);
   const prev = weekStats(st.sessions, ws - 7 * DAY, t);
-  const ids = st.cats.map((c) => c.id);
   const maxD = Math.max(HOUR, ...w.days.map((x) => x.total));
   const delta = prev.total ? Math.round(((w.total - prev.total) / prev.total) * 100) : null;
+  const caps = allCaps(st);
+  const topCaps = topLevelCaps(st);
 
   // Tendencia: últimas 8 semanas por grupo
   const trend = Array.from({ length: 8 }, (_, i) => {
@@ -150,21 +151,25 @@ function WeekView({ off, setOff }) {
       <h3 class="sec">Por categoría</h3>
       <Breakdown cats={catsWithData(st, w.totals)} totals={w.totals} />
 
-      <h3 class="sec">Por tope</h3>
-      <section class="panel stack">
-        {allCaps(st).map((cap) => (
-          <CapBar compact key={cap.key} group={cap} cats={cap.cats.map((id) => catById(st, id))} perCat={w.totals} used={sum(w.totals, cap.cats)} warnPct={st.warnPct} />
-        ))}
-      </section>
+      {caps.length > 0 && (
+        <>
+          <h3 class="sec">Por tope</h3>
+          <section class="panel stack">
+            {caps.map((cap) => (
+              <CapBar compact key={cap.key} group={cap} cats={cap.cats.map((id) => catById(st, id))} perCat={w.totals} used={sum(w.totals, cap.cats)} warnPct={st.warnPct} />
+            ))}
+          </section>
+        </>
+      )}
 
-      <h3 class="sec">Tendencia · 8 semanas</h3>
-      {topLevelCaps(st).map((g) => {
+      {topCaps.length > 0 && <h3 class="sec">Tendencia · 8 semanas</h3>}
+      {topCaps.map((g) => {
         const gc = g.cats;
         const cap = g.hours * HOUR;
-        const max = Math.max(cap * 1.15, ...trend.map((x) => sum(x.totals, gc)));
+        const max = Math.max(HOUR, cap * 1.15, ...trend.map((x) => sum(x.totals, gc)));
         return (
           <section class="panel trend" key={g.key}>
-            <div class="panel-title"><span class="pn">{g.name}</span> <span>tope {g.hours} h</span></div>
+            <div class="panel-title"><span class="pn">{g.name}</span> <span class="cap-meta">tope {g.hours} h</span></div>
             <div class="tbars">
               <i class="tcap" style={{ bottom: `${(cap / max) * 100}%` }} />
               {trend.map((x, i) => {

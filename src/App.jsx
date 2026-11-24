@@ -14,9 +14,9 @@ import { sum } from './stats.js';
 import { allCaps } from './model.js';
 import { CategorySheet, GroupSheet } from './components/Config.jsx';
 import { Money } from './screens/Money.jsx';
-import { IncomeSheet, MovSheet, StatementSheet } from './components/FinSheets.jsx';
+import { IncomeSheet, MovSheet, StatementPickDialog, StatementSheet } from './components/FinSheets.jsx';
 import { ExportSheet, ImportPasswordDialog } from './components/Sheets.jsx';
-import { AuthGate, PrivacyDialog, requestSettingsAuth, settingsNeedAuth } from './components/Privacy.jsx';
+import { AuthGate, PrivacyDialog, SheetAuthDialog, requestSettingsAuth, settingsNeedAuth } from './components/Privacy.jsx';
 
 const TABS = [
   ['home', 'Inicio', 'home'],
@@ -95,7 +95,7 @@ export function App() {
       const el = document.documentElement;
       el.dataset.v = st.variant;
       el.dataset.theme = theme;
-      document.querySelector('meta[name=theme-color]').content = BG[st.variant][theme];
+      document.querySelector('meta[name=theme-color]').content = (BG[st.variant] || BG.aurora)[theme];
     };
     apply();
     mq.addEventListener('change', apply);
@@ -147,6 +147,8 @@ export function App() {
       {st.sheet?.type === 'importpw' && <ImportPasswordDialog encrypted={st.sheet.encrypted} />}
       {st.sheet?.type === 'export' && <ExportSheet />}
       {st.sheet?.type === 'privacy' && <PrivacyDialog />}
+      {st.sheet?.type === 'sheetauth' && <SheetAuthDialog key={st.sheet.req} target={st.sheet.target} title={st.sheet.title} />}
+      {st.sheet?.type === 'pickstmt' && <StatementPickDialog />}
       {st.sheet?.type === 'stmt' && <StatementSheet results={st.sheet.results} />}
       {st.sheet?.type === 'mov' && <MovSheet key={st.sheet.id || 'new'} id={st.sheet.id} />}
       {st.sheet?.type === 'income' && <IncomeSheet key={st.sheet.id || 'new'} id={st.sheet.id} />}

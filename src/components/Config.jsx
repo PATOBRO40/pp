@@ -54,7 +54,7 @@ export function CategorySheet({ id }) {
           </Row>
           {c.cap != null && (
             <Row label="Horas">
-              <Stepper value={c.cap} step={0.5} unit="h" onChange={(v) => upd({ cap: v })} />
+              <Stepper value={c.cap} step={0.5} min={0.5} unit="h" onChange={(v) => upd({ cap: v })} />
             </Row>
           )}
         </div>
@@ -122,7 +122,7 @@ export function GroupSheet({ id }) {
         </label>
         <div class="panel tight">
           <Row label="Horas por semana" hint="Suma de todas sus categorías">
-            <Stepper value={g.hours} step={0.5} unit="h" onChange={(v) => upd({ hours: v })} />
+            <Stepper value={g.hours} step={0.5} min={0.5} unit="h" onChange={(v) => upd({ hours: v })} />
           </Row>
         </div>
         <div class="field"><span>Categorías que cuentan</span>

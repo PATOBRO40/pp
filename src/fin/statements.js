@@ -88,9 +88,11 @@ function parseNu(lines, items) {
   const p = all.match(/(\d{2})\s*-\s*(\d{2})\s+([A-Z]{3})\s+(\d{4})/);
   if (!p) throw new Error('No encontré el periodo del extracto.');
   const month = MONTHS[p[3].toLowerCase()];
+  if (!month) throw new Error('No encontré el mes del extracto.');
   const year = +p[4];
-  const greet = items.findIndex((i) => /Lleg[oó] tu extracto/i.test(i.str));
-  const holder = items[greet + 1]?.str.trim() || '';
+  const nonEmpty = items.filter((i) => i.str.trim());
+  const greet = nonEmpty.findIndex((i) => /Lleg[oó] tu extracto/i.test(i.str));
+  const holder = greet >= 0 ? nonEmpty[greet + 1]?.str.trim() || '' : '';
   const sum = (label) => {
     const m = all.match(new RegExp(label + '\\s+([+-]?\\$[\\d.]+,\\d{2})', 'i'));
     return m ? moneyEs(m[1]) : null;
@@ -107,8 +109,9 @@ function parseNu(lines, items) {
   }
   rows.sort((a, b) => a.date.localeCompare(b.date)); // ya vienen en orden; por si acaso
   const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const rawOut = sum('Lo que salió de tu cuenta');
   const summary = {
-    opening: sum('Tu dinero al inicio del mes'), in: sum('Lo que entró a tu cuenta'), out: -sum('Lo que salió de tu cuenta'),
+    opening: sum('Tu dinero al inicio del mes'), in: sum('Lo que entró a tu cuenta'), out: rawOut == null ? null : -rawOut,
     tax: -(sum('Impuesto del 4x1000') || 0), fees: -(sum('Costos por retiro') || 0),
     yield: sum('Rendimiento total de tu cuenta') || 0, closing: sum('Tu dinero a final del mes'),
   };
@@ -135,7 +138,7 @@ export function verify(st) {
   const ins = st.rows.filter((r) => r.amount > 0).reduce((a, r) => a + r.amount, 0);
   const outs = -st.rows.filter((r) => r.amount < 0).reduce((a, r) => a + r.amount, 0);
   const problems = [];
-  if (!st.rows.length) problems.push('No encontré movimientos.');
+  if (!st.rows.length && (s.in !== 0 || s.out !== 0)) problems.push('No encontré movimientos.');
   if (s.in != null && ins !== s.in) problems.push('Las entradas no suman lo que dice el resumen.');
   if (s.out != null && outs !== s.out) problems.push('Las salidas no suman lo que dice el resumen.');
   if (s.opening != null && s.closing != null) {

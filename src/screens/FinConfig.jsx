@@ -1,6 +1,6 @@
 // Configuración de Dinero: todo lo que decide la clasificación automática es editable.
 // Los cambios se aplican también a los meses ya importados (salvo lo que corregiste a mano).
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { Icon } from '../components/Icon.jsx';
 import { Row, Stepper, Toggle } from '../components/Controls.jsx';
 import { newId, set, setFin, toast, useStore } from '../store.js';
@@ -20,15 +20,34 @@ function CatSelect({ f, value, onChange }) {
 
 /** Campo de pesos que se guarda al salir del campo (evita reclasificar con cada tecla). */
 function MoneyInput({ cents, onChange }) {
+  const [val, setVal] = useState(String(Math.round(cents / P)));
+  useEffect(() => { setVal(String(Math.round(cents / P))); }, [cents]);
+  const commit = () => {
+    const next = pesos(val) * P;
+    setVal(String(Math.round(next / P)));
+    if (next !== cents) onChange(next);
+  };
   return (
-    <input class="money-in" type="text" inputmode="numeric" value={String(Math.round(cents / P))}
-      onChange={(e) => onChange(pesos(e.currentTarget.value) * P)} />
+    <input class="money-in" type="text" inputmode="numeric" value={val}
+      onInput={(e) => setVal(e.currentTarget.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
   );
 }
 
 function Bands({ f }) {
   const bands = [...f.bands].sort((a, b) => a.from - b.from);
-  const upd = (i, patch) => setFin((x) => ({ ...x, bands: bands.map((b, j) => (j === i ? { ...b, ...patch } : b)).sort((a, b) => a.from - b.from) }));
+  const upd = (i, patch) => {
+    if ('from' in patch) {
+      const nextFrom = Math.max(P, patch.from);
+      if (bands.some((b, j) => j !== i && b.from === nextFrom)) {
+        toast('Ya existe un rango desde ese monto', { kind: 'warn' });
+        return;
+      }
+      patch = { ...patch, from: nextFrom };
+    }
+    setFin((x) => ({ ...x, bands: bands.map((b, j) => (j === i ? { ...b, ...patch } : b)).sort((a, b) => a.from - b.from) }));
+  };
   const del = (i) => setFin((x) => ({ ...x, bands: bands.filter((_, j) => j !== i) }));
   const add = () => setFin((x) => ({ ...x, bands: [...bands, { from: (bands.at(-1)?.from || 0) + 10000 * P, cat: 'rest', conf: 'media' }] }));
   return (
@@ -109,7 +128,15 @@ function CatEditor({ f }) {
     setOpen(id);
   };
   const del = (id) => {
-    const prev = f;
+    const idx = f.cats.findIndex((c) => c.id === id);
+    const removed = f.cats[idx];
+    if (!removed) return;
+    const bandIdxs = new Set(f.bands.map((b, i) => (b.cat === id ? i : -1)).filter((i) => i >= 0));
+    const merchIdxs = new Set(f.merchants.map((m, i) => (m.cat === id ? i : -1)).filter((i) => i >= 0));
+    const memoKeys = new Set(Object.entries(f.memo).filter(([, v]) => v.cat === id).map(([k]) => k));
+    const movIds = new Set(f.movs.filter((m) => m.manual?.cat === id).map((m) => m.id));
+    const qrWas = f.qrSmall.cat === id;
+    const unkWas = f.unknownBuy === id;
     setFin((x) => ({
       ...x,
       cats: x.cats.filter((c) => c.id !== id),
@@ -119,9 +146,23 @@ function CatEditor({ f }) {
       movs: x.movs.map((m) => (m.manual?.cat === id ? { ...m, manual: { ...m.manual, cat: 'rest' } } : m)),
       qrSmall: x.qrSmall.cat === id ? { ...x.qrSmall, cat: 'rest' } : x.qrSmall,
       unknownBuy: x.unknownBuy === id ? 'rest' : x.unknownBuy,
-    }));
+    }), { immediate: true });
     setOpen(null);
-    toast('Categoría eliminada: lo suyo pasa a Restante', { action: { label: 'Deshacer', fn: () => setFin(() => prev) } });
+    toast('Categoría eliminada: lo suyo pasa a Restante', {
+      action: {
+        label: 'Deshacer',
+        fn: () => setFin((x) => ({
+          ...x,
+          cats: x.cats.some((c) => c.id === id) ? x.cats : [...x.cats.slice(0, idx), removed, ...x.cats.slice(idx)],
+          bands: x.bands.map((b, i) => (bandIdxs.has(i) && b.cat === 'rest' ? { ...b, cat: id } : b)),
+          merchants: x.merchants.map((m, i) => (merchIdxs.has(i) && m.cat === 'rest' ? { ...m, cat: id } : m)),
+          memo: Object.fromEntries(Object.entries(x.memo).map(([k, v]) => [k, memoKeys.has(k) && v.cat === 'rest' ? { ...v, cat: id } : v])),
+          movs: x.movs.map((m) => (movIds.has(m.id) && m.manual?.cat === 'rest' ? { ...m, manual: { ...m.manual, cat: id } } : m)),
+          qrSmall: qrWas && x.qrSmall.cat === 'rest' ? { ...x.qrSmall, cat: id } : x.qrSmall,
+          unknownBuy: unkWas && x.unknownBuy === 'rest' ? id : x.unknownBuy,
+        }), { immediate: true }),
+      },
+    });
   };
   return (
     <section class="panel list">
@@ -154,12 +195,26 @@ function CatEditor({ f }) {
 export function FinConfig({ back }) {
   const st = useStore();
   const f = st.fin;
+  const [owner, setOwner] = useState(f.owner || '');
+  useEffect(() => { setOwner(f.owner || ''); }, [f.owner]);
   const [wipe, setWipe] = useState('');
   const stmts = [...f.stmts].sort((a, b) => b.to.localeCompare(a.to));
   const removeStmt = (key) => {
-    const prev = f;
-    setFin((x) => ({ ...x, stmts: x.stmts.filter((s) => s.key !== key), movs: x.movs.filter((m) => m.src !== key) }));
-    toast('Extracto quitado', { action: { label: 'Deshacer', fn: () => setFin(() => prev) } });
+    const removedStmt = f.stmts.find((s) => s.key === key);
+    const removedMovs = f.movs.filter((m) => m.src === key);
+    if (!removedStmt && !removedMovs.length) return;
+    setFin((x) => ({ ...x, stmts: x.stmts.filter((s) => s.key !== key), movs: x.movs.filter((m) => m.src !== key) }), { immediate: true });
+    toast('Extracto quitado', {
+      action: {
+        label: 'Deshacer',
+        fn: () => setFin((x) => {
+          const ids = new Set(x.movs.map((m) => m.id));
+          const stmtsNext = removedStmt && !x.stmts.some((s) => s.key === key) ? [...x.stmts, removedStmt] : x.stmts;
+          const movsNext = [...x.movs, ...removedMovs.filter((m) => !ids.has(m.id))].sort((a, b) => a.date.localeCompare(b.date));
+          return { ...x, stmts: stmtsNext, movs: movsNext };
+        }, { immediate: true }),
+      },
+    });
   };
   return (
     <div class="screen no-privacy">
@@ -172,7 +227,9 @@ export function FinConfig({ back }) {
       <h3 class="sec">General</h3>
       <section class="panel tight">
         <label class="field"><span>Tu nombre (para reconocer tus transferencias)</span>
-          <input type="text" value={f.owner} onChange={(e) => setFin({ owner: e.currentTarget.value })} />
+          <input type="text" value={owner} onInput={(e) => setOwner(e.currentTarget.value)}
+            onBlur={() => { if (owner !== f.owner) setFin({ owner }); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
         </label>
         <Row label="El mes empieza el día" hint="Ej. tu día de pago">
           <Stepper value={f.monthStart} step={1} min={1} max={28} onChange={(v) => setFin({ monthStart: v })} />

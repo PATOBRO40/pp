@@ -37,14 +37,18 @@ export function latestPeriod(f) {
 }
 
 /** Ingresos fijos que tocan en un periodo (no se guardan como movimientos). */
-export function fixedIncomes(f, key) {
-  return f.incomes.filter((i) => i.amount > 0 && (!i.from || i.from <= key)).map((i) => ({
-    id: `fix:${i.id}:${key}`, acct: i.acct, date: `${key}-${pad(Math.min(i.day || 1, 28))}`, desc: i.name || 'Ingreso fijo', amount: i.amount, fixed: true,
-  }));
+export function fixedIncomes(f, key, start = f.monthStart || 1) {
+  return f.incomes.filter((i) => i.amount > 0 && (!i.from || i.from <= key)).map((i) => {
+    const day = Math.min(i.day || 1, 28);
+    const p = day < start ? shiftPeriod(key, 1) : key;
+    return {
+      id: `fix:${i.id}:${key}`, acct: i.acct, date: `${p}-${pad(day)}`, desc: i.name || 'Ingreso fijo', amount: i.amount, fixed: true,
+    };
+  });
 }
 
 /** Totales de un periodo. Montos en centavos (gastos en positivo). */
-export function periodStats(f, key) {
+export function periodStats(f, key, start = f.monthStart) {
   const cls = classified(f);
   const byCat = {};
   const byParty = {};
@@ -55,7 +59,7 @@ export function periodStats(f, key) {
   let count = 0;
   let pending = 0;
   for (const m of f.movs) {
-    if (periodOf(m.date, f.monthStart) !== key) continue;
+    if (periodOf(m.date, start) !== key) continue;
     const c = cls.get(m.id);
     count++;
     if (!c.manual && c.conf !== 'alta') pending++;
@@ -69,10 +73,10 @@ export function periodStats(f, key) {
     else if (c.type === 'rendimiento') yieldT += m.amount;
     else if (c.type === 'propia' && m.amount > 0) moved += m.amount;
   }
-  const fixed = fixedIncomes(f, key);
+  const fixed = fixedIncomes(f, key, start);
   for (const x of fixed) income += x.amount;
   // Rendimientos que Nu solo muestra en el resumen del extracto
-  for (const s of f.stmts) if (s.bank === 'nu' && periodOf(s.to, f.monthStart) === key) yieldT += s.summary?.yield || 0;
+  for (const s of f.stmts) if (s.bank === 'nu' && periodOf(s.to, start) === key) yieldT += s.summary?.yield || 0;
   const top = Object.entries(byParty).sort((a, b) => b[1] - a[1]).slice(0, 5);
   return { key, spent, income, yield: yieldT, balance: income + yieldT - spent, byCat, top, moved, count, pending, fixed };
 }
@@ -134,9 +138,9 @@ export const SAV_ACCOUNTS = [
   { id: 'cdt', bank: 'nu', name: 'CDT Nu', color: 3, saving: true },
 ];
 
-/** Periodos con algún extracto, del primero al último (sin huecos). */
+/** Periodos calendario con algún extracto, del primero al último (sin huecos). */
 export function savingsPeriods(f) {
-  const ps = f.stmts.map((s) => periodOf(s.to, f.monthStart)).sort();
+  const ps = f.stmts.map((s) => periodOf(s.to, 1)).sort();
   if (!ps.length) return [];
   const out = [];
   for (let k = ps[0]; k <= ps.at(-1); k = shiftPeriod(k, 1)) out.push(k);
@@ -144,32 +148,32 @@ export function savingsPeriods(f) {
 }
 
 /**
- * Saldos al cierre de un periodo. Si falta el extracto de un banco ese mes, usa el último
+ * Saldos al cierre de un mes calendario. Si falta el extracto de un banco ese mes, usa el último
  * conocido y lo marca como "stale". null si aún no hay ningún extracto de esa cuenta.
  */
 export function savingsAt(f, key) {
   const last = {};
   for (const s of f.stmts) {
-    const p = periodOf(s.to, f.monthStart);
+    const p = periodOf(s.to, 1);
     if (p <= key && (!last[s.bank] || s.to > last[s.bank].to)) last[s.bank] = s;
   }
   const rows = SAV_ACCOUNTS.map((a) => {
     const s = last[a.bank];
     const v = s?.balances?.[a.id];
-    return { ...a, value: v ?? null, at: s?.to || null, stale: !!s && periodOf(s.to, f.monthStart) < key };
+    return { ...a, value: v ?? null, at: s?.to || null, stale: !!s && periodOf(s.to, 1) < key };
   }).filter((r) => r.value != null);
   const total = rows.reduce((a, r) => a + r.value, 0);
   const saved = rows.filter((r) => r.saving).reduce((a, r) => a + r.value, 0);
   return { key, rows, total, saved, has: rows.length > 0 };
 }
 
-const stmtFor = (f, bank, key) => f.stmts.find((s) => s.bank === bank && periodOf(s.to, f.monthStart) === key);
+const stmtFor = (f, bank, key) => f.stmts.find((s) => s.bank === bank && periodOf(s.to, 1) === key);
 
-/** Rendimientos de un periodo, por bolsillo. */
+/** Rendimientos de un mes calendario, por bolsillo. */
 export function yieldsAt(f, key) {
   const cls = classified(f);
   const out = [];
-  const nequi = f.movs.filter((m) => m.acct === 'nequi' && periodOf(m.date, f.monthStart) === key && cls.get(m.id).type === 'rendimiento')
+  const nequi = f.movs.filter((m) => m.acct === 'nequi' && periodOf(m.date, 1) === key && cls.get(m.id).type === 'rendimiento')
     .reduce((a, m) => a + m.amount, 0);
   if (nequi) out.push({ id: 'nequi', name: 'Nequi', value: nequi });
   const nu = stmtFor(f, 'nu', key);
@@ -187,11 +191,11 @@ export function yieldsAt(f, key) {
   return { rows: out, total: out.reduce((a, r) => a + r.value, 0) };
 }
 
-/** Una fila por periodo: saldo, cambio, de dónde vino, rendimientos y tasa de ahorro. */
+/** Una fila por mes calendario: saldo, cambio, de dónde vino, rendimientos y tasa de ahorro. */
 export function savingsRow(f, key) {
   const at = savingsAt(f, key);
   const prev = savingsAt(f, shiftPeriod(key, -1));
-  const s = periodStats(f, key);
+  const s = periodStats(f, key, 1);
   const y = yieldsAt(f, key);
   const growth = at.has && prev.has ? at.total - prev.total : null;
   const own = s.income - s.spent; // lo que ahorraste de tus ingresos
@@ -216,7 +220,7 @@ export function savingsStats(f, keys) {
   const covered = base?.has ? rows : rows.slice(1);
   const rates = rows.filter((r) => r.rate != null);
   const yieldBy = {};
-  for (const k of keys) for (const y of yieldsAt(f, k).rows) yieldBy[y.name] = (yieldBy[y.name] || 0) + y.value;
+  for (const r of covered) for (const y of yieldsAt(f, r.key).rows) yieldBy[y.name] = (yieldBy[y.name] || 0) + y.value;
   return {
     rows,
     growth,
@@ -231,32 +235,6 @@ export function savingsStats(f, keys) {
     best: grown.length ? grown.reduce((a, r) => (r.growth > a.growth ? r : a)) : null,
     worst: grown.length ? grown.reduce((a, r) => (r.growth < a.growth ? r : a)) : null,
   };
-}
-
-/** Saldos según el último extracto de cada banco. */
-export function savings(f) {
-  const last = {};
-  for (const s of f.stmts) if (!last[s.bank] || s.to > last[s.bank].to) last[s.bank] = s;
-  const rows = [];
-  if (last.nequi) rows.push({ id: 'nequi', name: 'Nequi', value: last.nequi.balances.nequi, at: last.nequi.to });
-  if (last.nu) {
-    const b = last.nu.balances;
-    if (b.nu != null) rows.push({ id: 'nu', name: 'Cuenta Nu', value: b.nu, at: last.nu.to });
-    if (b.cajitas != null) rows.push({ id: 'cajitas', name: 'Cajitas Nu', value: b.cajitas, at: last.nu.to, saving: true });
-    if (b.cdt != null) rows.push({ id: 'cdt', name: 'CDT Nu', value: b.cdt, at: last.nu.to, saving: true });
-  }
-  const total = rows.reduce((a, r) => a + (r.value || 0), 0);
-  const saved = rows.filter((r) => r.saving).reduce((a, r) => a + (r.value || 0), 0);
-  return { rows, total, saved };
-}
-
-/** Total de saldos al cierre de cada periodo (con los extractos de ese periodo). */
-export function savingsHistory(f, keys) {
-  return keys.map((k) => {
-    const ss = f.stmts.filter((s) => periodOf(s.to, f.monthStart) === k);
-    const v = ss.reduce((a, s) => a + Object.values(s.balances || {}).reduce((x, y) => x + (y || 0), 0), 0);
-    return { key: k, value: ss.length ? v : null };
-  });
 }
 
 /** Movimientos que conviene revisar: asignados con confianza media o baja y sin corregir. */

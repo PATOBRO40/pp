@@ -1,6 +1,6 @@
 # PP
 
-PWA personal de seguimiento de tiempo para iPhone. Tres categorías, topes semanales, registro y estadísticas. Todo se guarda en el dispositivo: no hay backend ni cuentas.
+PWA personal de seguimiento de tiempo y finanzas para iPhone. Categorías configurables, topes semanales propios y compartidos, registro, estadísticas y módulo opcional **Dinero** a partir de extractos en PDF de Nequi y Nu. Todo se guarda en el dispositivo: no hay backend ni cuentas.
 
 Zona horaria: America/Bogota. La semana empieza el lunes.
 
@@ -8,9 +8,11 @@ Zona horaria: America/Bogota. La semana empieza el lunes.
 
 ```bash
 npm install
-npm run dev       # http://localhost:5173 y por la red local
-npm run build     # genera dist/ (incluye sw.js)
-npm run preview   # sirve dist/ en http://localhost:4173
+npm run dev        # http://localhost:5173 y por la red local
+npm run build      # genera dist/ (incluye sw.js)
+npm run preview    # sirve dist/ en http://localhost:4173
+npm run test:unit  # pruebas unitarias (datos sintéticos en tests/)
+npm run test:e2e   # pruebas en Edge 393×852 con WebAuthn virtual
 ```
 
 El service worker solo se registra en la versión compilada. Por `http://IP-local` no funciona: para probar instalación y modo sin conexión hace falta HTTPS (GitHub Pages).
@@ -57,15 +59,16 @@ Los ajustes de la versión anterior se migran solos (`migrateSettings`): un grup
 
 Los datos viven solo en el almacenamiento de la app instalada, que es independiente del de Safari. Si se borra la app, se borran los datos. Exporta desde **Ajustes → Datos y respaldo**; la app lo recuerda cada 7 días.
 
-Formato: `{ app: "PP", schema: 2, exportedAt, settings, sessions }`. Si cambia la estructura, sube `schema` y añade la migración en `parseBackup`.
+Formato: `{ app: "PP", schema: 3, exportedAt, settings, sessions, fin? }`. Si cambia la estructura, sube `schema` y añade la migración en `parseBackup`. Los respaldos pueden exportarse cifrados con contraseña (recomendado, AES-GCM + PBKDF2) o en claro; al importar se validan estructura, rangos y valores permitidos, y en modo «Combinar» se conservan también las categorías faltantes referenciadas.
 
 ## Bloqueo y cifrado
 
-Opcional, en **Ajustes → Seguridad**. Al activarlo, sesiones y ajustes se guardan **cifrados** (AES-GCM de 256 bits) en la clave `vault` de IndexedDB, y se borra la copia en claro.
+Opcional, en **Ajustes → Seguridad**. Al activarlo, sesiones, ajustes y Dinero se guardan **cifrados** (AES-GCM de 256 bits) en la clave `vault` de IndexedDB, y se borra la copia en claro.
 
 - Una clave maestra aleatoria cifra los datos. Se guarda envuelta con la contraseña (PBKDF2-SHA256, 310 000 iteraciones) y, si Face ID está activo, con el secreto de la extensión PRF de WebAuthn (requiere iOS 18 o posterior).
-- Al bloquear, la clave y los datos se borran de la memoria. En claro solo quedan el tema y el estilo (`meta.ui`), para dibujar la pantalla de bloqueo.
-- La configuración está en la clave `lock` y no entra en los respaldos. Los respaldos JSON van **sin cifrar**.
+- Al bloquear, la clave, los datos y la caché de clasificación se borran de la memoria. En claro solo quedan el tema y el estilo (`meta.ui`), para dibujar la pantalla de bloqueo.
+- La configuración está en la clave `lock` y no entra en los respaldos.
+- El guardado pendiente se vuelca antes de pasar a segundo plano o actualizar, y el bloqueo inmediato «Al salir» pausa brevemente mientras están abiertos el selector de archivos o la hoja de compartir de iOS.
 - Sin servidor no hay recuperación: si se olvida la contraseña y no hay Face ID, entrar exige borrar sesiones y ajustes.
 - Un bloqueo de la versión 1.2–1.3 (solo hash, datos en claro) se migra al entrar con la contraseña. Face ID hay que volver a activarlo.
 - Al salir de la app, una pantalla de privacidad tapa el contenido para que la captura del selector de apps de iOS no muestre datos.
@@ -80,19 +83,21 @@ Pestaña opcional que **solo funciona con el bloqueo activo**: sus datos viajan 
 - **Solo se guarda** fecha, descripción, valor y cuenta, más el nombre del titular para reconocer las transferencias propias. No se guardan cédula, dirección, correo ni números de cuenta.
 - **Clasificación automática**, recalculada siempre a partir de reglas editables en Dinero → Configurar. El orden de prioridad es:
   1. Corrección manual del movimiento.
-  2. Lo recordado para esa persona o comercio.
-  3. Transferencias propias, que se emparejan entre cuentas y no cuentan.
-  4. Reversos, que anulan su compra.
-  5. Rangos por monto para pagos a personas.
-  6. QR pequeños.
-  7. Comercios por texto.
+  2. Reversos, que anulan su compra anterior del mismo monto.
+  3. Lo recordado para esa persona o comercio (`memo`).
+  4. Transferencias propias, que se emparejan entre cuentas y no cuentan.
+  5. Recargas desde otro banco.
+  6. Intereses y rendimientos.
+  7. Rangos por monto para pagos a personas.
+  8. QR pequeños.
+  9. Comercios por texto (o categoría por defecto si no hay regla).
 - **Rangos por defecto** para pagos a personas:
   - Menos de $6.000: consumo básico mínimo.
   - $6.000 a $8.000: transporte.
   - $8.001 a $9.000: transporte, para revisar.
   - $9.001 a $10.000: transporte, confianza baja.
   - Más de $10.000: consumo básico medio.
-- **Recargas desde otro banco**: por defecto son dinero propio y no cuentan como ingreso. Los ingresos fijos se configuran aparte.
+- **Recargas desde otro banco**: por defecto cuentan como **ingreso** (`recargas: 'ingreso'`), y pueden cambiarse a dinero propio en Dinero → Configurar. Los ingresos fijos se configuran aparte.
 - **Montos** en centavos enteros. **Fechas** como `AAAA-MM-DD`. El mes puede empezar cualquier día.
 
 **Ahorro.** Muestra los saldos al cierre de cada mes con extracto, navegables por mes. Si falta el extracto de un banco ese mes, se usa el último saldo conocido y se marca. También incluye:
@@ -125,7 +130,7 @@ Con el ojo de cada pantalla, o en **Ajustes → Privacidad en pantalla**, hay tr
 - Se guarda como ajuste (`privacy`) y sigue activo hasta cambiarlo.
 - Cambiar de modo exige confirmar con Face ID (se pide al tocar la opción) o con la contraseña. Usa el mismo límite de intentos que la entrada. Sin bloqueo configurado, el cambio es directo.
 - No aplica en Ajustes ni en Dinero → Configurar.
-- **Ajustes y Dinero → Configurar quedan protegidos** mientras haya un modo de ocultar activo y bloqueo configurado: piden Face ID o la contraseña. Face ID se pide al tocar la pestaña o el engranaje. La autorización dura hasta salir de esa pantalla (`settingsAuth` y `finCfgAuth`, que no se guardan) y se retira al bloquear la app.
+- **Ajustes, Dinero → Configurar y hojas sensibles quedan protegidos** mientras haya un modo de ocultar activo y bloqueo configurado: piden Face ID o la contraseña (incluyendo editar/añadir sesión, reiniciar tiempo, detalle/registro de movimiento, importar extractos y exportar respaldo, también desde el aviso de Inicio). Face ID se pide al tocar el botón o pestaña. En Ajustes y Dinero → Configurar la autorización dura hasta salir de esa pantalla (`settingsAuth` y `finCfgAuth`, que no se guardan); en las hojas sensibles se pide cada vez y siempre se retira al bloquear la app.
 - Se implementa con CSS sobre `html[data-privacy]`: el texto sigue en el DOM pero no se ve. Es para que nadie lo lea de reojo, no es un cifrado.
 
 ## Publicar cambios

@@ -39,7 +39,8 @@ function merchantCat(f, text) {
 
 function bandFor(f, cents) {
   const v = Math.abs(cents);
-  const sorted = [...f.bands].sort((a, b) => a.from - b.from);
+  const sorted = [...(f.bands || [])].sort((a, b) => a.from - b.from);
+  if (!sorted.length) return { from: 0, cat: 'rest', conf: 'baja' };
   let hit = sorted[0];
   for (const b of sorted) if (v >= b.from) hit = b;
   return hit;
@@ -66,11 +67,17 @@ export function classify(f) {
     if (b) { paired.add(a.m.id); paired.add(b.m.id); }
   }
   // 2. Reversos: anulan la compra del mismo valor en la misma cuenta
+  const STOP = new Set(['de', 'del', 'en', 'la', 'el', 'a', 'con', 'por', 'compra']);
   const voided = new Set();
   for (const r of info.filter((x) => x.kind === 'reverso' && x.m.amount > 0)) {
-    const w = norm(r.party).split(' ')[0];
-    const c = info.find((x) => !voided.has(x.m.id) && x.m.acct === r.m.acct && x.m.amount === -r.m.amount &&
-      x.kind !== 'reverso' && norm(x.m.desc).includes(w) && dayDiff(x.m.date, r.m.date) <= 15);
+    const w = norm(r.party).split(' ').find((t) => t.length >= 2 && !STOP.has(t));
+    if (!w) continue;
+    const rTime = Date.parse(r.m.date);
+    const c = info.find((x) => {
+      if (voided.has(x.m.id) || x.m.acct !== r.m.acct || x.m.amount !== -r.m.amount || x.kind === 'reverso') return false;
+      const diff = (rTime - Date.parse(x.m.date)) / 86400000;
+      return diff >= 0 && diff <= 15 && norm(x.m.desc).includes(w);
+    });
     if (c) { voided.add(c.m.id); voided.add(r.m.id); }
   }
 
@@ -115,4 +122,9 @@ let memoR = null;
 export function classified(f) {
   if (f !== memoF) { memoF = f; memoR = classify(f); }
   return memoR;
+}
+
+export function clearClassifiedCache() {
+  memoF = null;
+  memoR = null;
 }

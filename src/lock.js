@@ -9,7 +9,7 @@
 // Un registro sin "v" es de la versión 1.2–1.3 (solo un hash, datos en claro): se migra
 // al entrar con la contraseña.
 import * as V from './vault.js';
-import { disableVault, enableVault, getState, lockApp, openVault, set, setLock, wipeData } from './store.js';
+import { disableVault, enableVault, flushPending, getState, lockApp, openVault, set, setLock, wipeData } from './store.js';
 
 const ITERATIONS = 310000;
 const MAX_FAILS = 5;
@@ -115,8 +115,24 @@ export async function biometricAvailable() {
 
 // El diálogo de Face ID puede ocultar la página: no debe contar como "salir de la app".
 let authBusy = false;
+let pickerPauseUntil = 0;
+
+export function pauseAutoLock(ms = 120000) {
+  pickerPauseUntil = Date.now() + ms;
+}
+
+export function resumeAutoLock() {
+  pickerPauseUntil = 0;
+}
 
 export class NoPrfError extends Error {}
+export class NeedSecondTapError extends Error {
+  constructor(id, salt) {
+    super('Toca de nuevo para confirmar Face ID');
+    this.credId = id;
+    this.salt = salt;
+  }
+}
 
 /** Pide Face ID y devuelve el secreto PRF de la credencial. */
 async function assertBio(id, salt) {
@@ -138,6 +154,21 @@ async function assertBio(id, salt) {
   const secret = a.getClientExtensionResults?.().prf?.results?.first;
   if (!secret) throw new NoPrfError('Face ID no entrega la clave de cifrado');
   return new Uint8Array(secret);
+}
+
+export async function finishBiometricEnrollment(id, salt) {
+  const master = V.masterCopy();
+  if (!master) throw new Error('Bloqueada');
+  authBusy = true;
+  try {
+    const secret = await assertBio(id, salt);
+    const w = await V.wrap(await V.prfKey(secret), master);
+    secret.fill(0);
+    await setLock({ ...getState().lock, bio: { credId: toB64(id), salt: toB64(salt), w } });
+  } finally {
+    master.fill(0);
+    authBusy = false;
+  }
 }
 
 /**
@@ -166,7 +197,17 @@ export async function enrollBiometric() {
     const prf = cred.getClientExtensionResults?.().prf;
     if (!prf || prf.enabled === false) throw new NoPrfError('Sin PRF');
     // Algunos navegadores solo entregan el secreto al verificar, no al registrar.
-    const secret = prf.results?.first ? new Uint8Array(prf.results.first) : await assertBio(id, salt);
+    let secret;
+    if (prf.results?.first) {
+      secret = new Uint8Array(prf.results.first);
+    } else {
+      try {
+        secret = await assertBio(id, salt);
+      } catch (e) {
+        if (e?.name === 'NotAllowedError') throw new NeedSecondTapError(id, salt);
+        throw e;
+      }
+    }
     const w = await V.wrap(await V.prfKey(secret), master);
     secret.fill(0);
     await setLock({ ...getState().lock, bio: { credId: toB64(id), salt: toB64(salt), w } });
@@ -227,15 +268,18 @@ export function initAutoLock() {
   let hiddenAt = null;
   const cover = (on) => document.documentElement.classList.toggle('covered', on);
   const onHide = () => {
+    flushPending();
     cover(true);
     const { lock, locked } = getState();
     if (!lock || locked || authBusy) { hiddenAt = null; return; }
     if (hiddenAt == null) hiddenAt = Date.now();
-    if (lock.grace === 0) lockApp();
+    if (lock.grace === 0 && Date.now() >= pickerPauseUntil) lockApp();
   };
   const onShow = () => {
     const { lock, locked } = getState();
-    if (lock && !locked && !authBusy && hiddenAt != null && Date.now() - hiddenAt >= lock.grace) lockApp();
+    const paused = Date.now() < pickerPauseUntil;
+    pickerPauseUntil = 0;
+    if (lock && !locked && !authBusy && !paused && hiddenAt != null && Date.now() - hiddenAt >= lock.grace) lockApp();
     hiddenAt = null;
     cover(false);
   };

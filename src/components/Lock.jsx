@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import { Icon } from './Icon.jsx';
 import { hasFinData } from '../fin/model.js';
-import { set, toast, useNow, useStore } from '../store.js';
+import { set, toast, useNow, useStore, getState } from '../store.js';
 import {
   MIN_LENGTH, NoPrfError, checkPassword, confirmBiometric, enrollBiometric, hasBiometric, isLegacy,
   removeLock, savePassword, unlockWithBiometric, unlockWithPassword, wipeAndUnlock,
@@ -17,9 +17,11 @@ async function reEnrollBio() {
   }
 }
 
-export const bioError = (e) => (e instanceof NoPrfError
-  ? 'Este iPhone no permite usar Face ID con datos cifrados (requiere iOS 18 o posterior). Sigue entrando con tu contraseña.'
-  : 'No se pudo activar Face ID. Revisa que el Llavero de iCloud esté activo.');
+export const bioError = (e) => {
+  if (e instanceof NoPrfError) return 'Este iPhone no permite usar Face ID con datos cifrados (requiere iOS 18 o posterior). Sigue entrando con tu contraseña.';
+  if (e?.name === 'AbortError' || e?.name === 'NotAllowedError') return 'Activación de Face ID cancelada.';
+  return 'No se pudo activar Face ID. Revisa que el Llavero de iCloud esté activo.';
+};
 
 const fmtWait = (ms) => {
   const s = Math.ceil(ms / 1000);
@@ -69,6 +71,19 @@ export function LockScreen() {
     }
   };
 
+  const wipe = async () => {
+    if (busy) return;
+    setBusy(true);
+    setErr('');
+    try {
+      await wipeAndUnlock();
+    } catch {
+      setErr('No se pudieron borrar los datos. Inténtalo de nuevo.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (forgot) {
     return (
       <div class="lock">
@@ -79,8 +94,9 @@ export function LockScreen() {
             ? <p>La otra opción es <b>borrar todas tus sesiones</b> y quitar el bloqueo. Luego podrás importar un respaldo.</p>
             : <p>Tus datos están cifrados con ella. La otra opción es <b>borrar todas tus sesiones y ajustes</b> y quitar el bloqueo. Luego podrás importar un respaldo.</p>}
           <input type="text" placeholder="Escribe BORRAR" value={txt} autocapitalize="characters" onInput={(e) => setTxt(e.currentTarget.value)} />
-          <button class="btn danger-solid" disabled={txt.trim().toUpperCase() !== 'BORRAR'} onClick={wipeAndUnlock}>Borrar datos y entrar</button>
-          <button class="btn ghost" onClick={() => { setForgot(false); setTxt(''); }}>Volver</button>
+          {err && <p class="msg err">{err}</p>}
+          <button class="btn danger-solid" disabled={busy || txt.trim().toUpperCase() !== 'BORRAR'} onClick={wipe}>Borrar datos y entrar</button>
+          <button class="btn ghost" onClick={() => { setForgot(false); setTxt(''); setErr(''); }}>Volver</button>
         </div>
       </div>
     );
@@ -140,7 +156,7 @@ export function LockSheet({ mode }) {
     setErr('');
     try {
       if (needsCurrent && !(await checkPassword(current))) {
-        setErr(Date.now() < (st.lock.until || 0) ? 'Demasiados intentos. Espera un momento.' : 'La contraseña actual no es correcta.');
+        setErr(Date.now() < (getState().lock?.until || 0) ? 'Demasiados intentos. Espera un momento.' : 'La contraseña actual no es correcta.');
         setCurrent('');
         return;
       }

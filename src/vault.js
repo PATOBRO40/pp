@@ -25,6 +25,7 @@ export const isOpen = () => !!key;
 export const masterCopy = () => (raw ? raw.slice() : null);
 
 export async function open(master) {
+  if (raw) raw.fill(0);
   key = await crypto.subtle.importKey('raw', master, 'AES-GCM', false, ['encrypt', 'decrypt']);
   raw = master;
 }
@@ -81,10 +82,26 @@ export async function sealWithPassword(text, password) {
   return { v: 1, kdf: { salt: toB64(salt), iterations: BACKUP_ITER }, iv: toB64(iv), ct: toB64Big(ct) };
 }
 
-/** Lanza un error si la contraseña no es la correcta. */
+export class BackupFormatError extends Error {}
+
+/** Lanza un error si la contraseña no es la correcta o BackupFormatError si el archivo está dañado. */
 export async function openWithPassword(e, password) {
-  const k = await passwordKey(password, fromB64(e.kdf.salt), e.kdf.iterations);
-  return dec.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(e.iv), additionalData: AAD_BACKUP }, k, fromB64(e.ct)));
+  let salt, iv, ct;
+  try {
+    if (!e || e.v !== 1 || typeof e.iv !== 'string' || typeof e.ct !== 'string' || !e.kdf ||
+      typeof e.kdf.salt !== 'string' || !Number.isInteger(e.kdf.iterations) ||
+      e.kdf.iterations < 100000 || e.kdf.iterations > 2000000) {
+      throw new Error('bad');
+    }
+    salt = fromB64(e.kdf.salt);
+    iv = fromB64(e.iv);
+    ct = fromB64(e.ct);
+    if (salt.length < 8 || iv.length !== 12 || ct.length < 16) throw new Error('bad');
+  } catch {
+    throw new BackupFormatError('El respaldo cifrado está dañado o no es compatible.');
+  }
+  const k = await passwordKey(password, salt, e.kdf.iterations);
+  return dec.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: AAD_BACKUP }, k, ct));
 }
 
 /** Base64 para datos grandes (sin desbordar la pila). */

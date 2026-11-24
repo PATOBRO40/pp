@@ -1,9 +1,9 @@
 import { useState } from 'preact/hooks';
 import { Icon } from '../components/Icon.jsx';
-import { PrivacyButton } from '../components/Privacy.jsx';
+import { PrivacyButton, openProtectedSheet } from '../components/Privacy.jsx';
 import { CapBar } from '../components/CapBar.jsx';
 import { DAY, fmtDM, fmtDayShort, fmtDur, fmtTime, rangeTotals, splitByDay, startOfWeek } from '../time.js';
-import { set, useNow, useStore } from '../store.js';
+import { useNow, useStore } from '../store.js';
 import { sum } from '../stats.js';
 import { catById, topLevelCaps } from '../model.js';
 
@@ -28,6 +28,8 @@ export function Log() {
   }
   const days = [...byDay.entries()].sort((a, b) => b[0] - a[0]);
 
+  const caps = topLevelCaps(st);
+
   return (
     <div class="screen">
       <header class="top">
@@ -35,7 +37,7 @@ export function Log() {
           <div class="eyebrow">Registro</div>
           <h1>{off === 0 ? 'Esta semana' : `${fmtDM(ws)} – ${fmtDM(we - DAY)}`}</h1>
         </div>
-        <div class="top-actions"><PrivacyButton /><button class="round" aria-label="Añadir sesión" onClick={() => set({ sheet: { type: 'edit', id: null } })}><Icon name="plus" /></button></div>
+        <div class="top-actions"><PrivacyButton /><button class="round" aria-label="Añadir sesión" onClick={() => openProtectedSheet({ type: 'edit', id: null }, 'Añadir sesión')}><Icon name="plus" /></button></div>
       </header>
 
       <div class="weeknav">
@@ -47,11 +49,13 @@ export function Log() {
         <button class="round sm" aria-label="Semana siguiente" disabled={off >= 0} onClick={() => setOff(off + 1)}><Icon name="right" size={18} /></button>
       </div>
 
-      <section class="panel stack">
-        {topLevelCaps(st).map((cap) => (
-          <CapBar compact key={cap.key} group={cap} cats={cap.cats.map((id) => catById(st, id))} perCat={week} used={sum(week, cap.cats)} warnPct={st.warnPct} />
-        ))}
-      </section>
+      {caps.length > 0 && (
+        <section class="panel stack">
+          {caps.map((cap) => (
+            <CapBar compact key={cap.key} group={cap} cats={cap.cats.map((id) => catById(st, id))} perCat={week} used={sum(week, cap.cats)} warnPct={st.warnPct} />
+          ))}
+        </section>
+      )}
 
       {days.length === 0 && <div class="empty"><Icon name="list" size={30} /><p>Sin sesiones esta semana.</p></div>}
 
@@ -78,7 +82,7 @@ export function Log() {
                 const contTo = (g.s.end ?? t) > g.dayStart + DAY;
                 return (
                   <button class="srow" key={g.s.id + g.dayStart} style={{ '--c': `var(--p${c.color})` }}
-                    onClick={() => set({ sheet: { type: 'edit', id: g.s.id } })}>
+                    onClick={() => openProtectedSheet({ type: 'edit', id: g.s.id }, 'Editar sesión')}>
                     <i class="bar" />
                     <span class="srow-main">
                       <span class="srow-name">{c.name}{running && <em class="live">en curso</em>}</span>

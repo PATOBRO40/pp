@@ -21,15 +21,20 @@ export async function readStatements(files) {
   toast('Leyendo extracto…', { kind: 'info' });
   const results = [];
   for (const file of files) results.push(await readOne(file.name, new Uint8Array(await file.arrayBuffer())));
+  if (getState().locked) return;
   set({ toast: null, sheet: { type: 'stmt', results } });
 }
 
 /** Reintenta un PDF con contraseña. */
 export async function retryWithPassword(index, password) {
   const sh = getState().sheet;
+  if (sh?.type !== 'stmt') return;
   const r = sh.results[index];
+  if (!r) return;
   const next = await readOne(r.name, r.data, password);
-  set({ sheet: { ...sh, results: sh.results.map((x, i) => (i === index ? next : x)) } });
+  const cur = getState();
+  if (cur.locked || cur.sheet?.type !== 'stmt') return;
+  set({ sheet: { ...cur.sheet, results: cur.sheet.results.map((x, i) => (i === index ? next : x)) } });
 }
 
 export function preview(st) {
@@ -41,12 +46,11 @@ export function commitStatements(sts) {
   let f = getState().fin;
   let added = 0;
   for (const st of sts) {
-    const before = f.movs.length;
+    added += previewImport(f, st).fresh;
     f = mergeStatement(f, st);
-    added += f.movs.length - before;
   }
   const last = sts.map((s) => s.period.to).sort().at(-1);
-  set({ fin: f, sheet: null, finView: 'resumen', finKey: periodOf(last, f.monthStart) });
+  set({ fin: f, sheet: null, finView: 'resumen', finKey: periodOf(last, f.monthStart) }, { immediate: true });
   toast(added > 0 ? `Importados ${added} movimientos` : 'Sin movimientos nuevos: ya estaban importados', { kind: 'ok' });
 }
 
